@@ -56,8 +56,20 @@
   let connectionState = $state<'connecting' | 'connected' | 'disconnected' | 'error'>('connecting');
   let errorMessage = $state<string | null>(null);
   let showAccessoryBar = $state(true);
+  let dockTop = $state<boolean>(
+    typeof window !== 'undefined' && localStorage.getItem('opentermius_keybar_dock') === 'top'
+  );
+  let ctrlActive = $state(false);
+  let altActive = $state(false);
   let btnTouch = $derived(platform.isHandheld ? 'h-9 w-9 justify-center' : 'px-2 py-1');
   let sessionStartMs = 0;
+
+  function toggleDockPosition() {
+    dockTop = !dockTop;
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('opentermius_keybar_dock', dockTop ? 'top' : 'bottom');
+    }
+  }
 
   function recordSessionLog() {
     if (typeof window === 'undefined') return;
@@ -98,7 +110,34 @@
     });
   }
 
+  function applyModifiers(input: string): string {
+    let out = input;
+    if (ctrlActive && out.length === 1) {
+      const code = out.toUpperCase().charCodeAt(0);
+      if (code >= 64 && code <= 95) {
+        out = String.fromCharCode(code - 64);
+      }
+      ctrlActive = false;
+    }
+    if (altActive) {
+      out = `\x1b${out}`;
+      altActive = false;
+    }
+    return out;
+  }
+
   function handleVirtualKey(key: string) {
+    if (key === 'MOD_CTRL') {
+      ctrlActive = !ctrlActive;
+      term?.focus();
+      return;
+    }
+    if (key === 'MOD_ALT') {
+      altActive = !altActive;
+      term?.focus();
+      return;
+    }
+
     let toSend = key;
     if (key === 'ESC') toSend = '\x1b';
     else if (key === 'TAB') toSend = '\t';
@@ -106,25 +145,32 @@
     else if (key === 'DOWN') toSend = '\x1b[B';
     else if (key === 'RIGHT') toSend = '\x1b[C';
     else if (key === 'LEFT') toSend = '\x1b[D';
+    else if (key === 'HOME') toSend = '\x1b[H';
+    else if (key === 'END') toSend = '\x1b[F';
     else if (key === 'PGUP') toSend = '\x1b[5~';
     else if (key === 'PGDN') toSend = '\x1b[6~';
     else if (key === 'CTRL_C') toSend = '\x03';
     else if (key === 'CTRL_D') toSend = '\x04';
     else if (key === 'CTRL_Z') toSend = '\x1a';
+    else if (key === 'CTRL_L') toSend = '\x0c';
+    else toSend = applyModifiers(toSend);
 
     sendTerminalInput(toSend);
     term?.focus();
   }
 
-  // Auto-fit and focus whenever tab becomes active
+  // Auto-fit and focus whenever tab becomes active or viewport/bar changes
   $effect(() => {
+    const _vh = platform.visualHeight;
+    const _h = platform.height;
+    const _bar = showAccessoryBar;
+    const _dock = dockTop;
     if (active && fitAddon && term) {
       setTimeout(() => {
         try {
           fitAddon?.fit();
-          term?.focus();
         } catch {}
-      }, 50);
+      }, 40);
     }
   });
 
@@ -213,7 +259,7 @@
     }, 20);
 
     term.onData((data) => {
-      sendTerminalInput(data);
+      sendTerminalInput(applyModifiers(data));
     });
 
     term.onResize(({ cols, rows }) => {
@@ -272,9 +318,9 @@
   }
 </script>
 
-<div class="flex h-full flex-col bg-[#0a0a0c]">
+<div class="flex h-full min-h-0 flex-col bg-[#0a0a0c] overflow-hidden">
   <!-- Top Session Toolbar -->
-  <div class="flex h-10 items-center justify-between border-b border-[#1a1a24] bg-[#0d0d12] px-4">
+  <div class="flex h-10 shrink-0 items-center justify-between border-b border-[#1a1a24] bg-[#0d0d12] px-3 sm:px-4">
     <div class="flex items-center gap-3">
       <div class="flex items-center gap-2">
         <span class="relative flex h-2 w-2">
@@ -364,8 +410,196 @@
     </div>
   </div>
 
+  {#snippet accessoryBarSnippet()}
+    {#if platform.isHandheld}
+      <!-- 2-Row Ergonomic Touch Special Keys Bar for Mobile & Tablet -->
+      <div class="shrink-0 bg-[#101018] {dockTop ? 'border-b' : 'border-t pb-1.5'} border-[#222232] px-2 pt-1.5 pb-1 space-y-1.5 select-none z-20">
+        <!-- Row 1: Modifiers (ESC, TAB, Sticky CTRL/ALT, Shortcuts, Symbols) -->
+        <div class="flex items-center gap-1.5 overflow-x-auto no-scrollbar">
+          <button
+            type="button"
+            onpointerdown={(e) => { e.preventDefault(); handleVirtualKey('ESC'); }}
+            class="h-9 min-w-[44px] px-2.5 rounded-lg bg-[#1a1a28] border border-[#2a2a3d] text-xs font-mono font-semibold text-neutral-200 active:bg-emerald-600 active:text-white transition shrink-0"
+          >
+            ESC
+          </button>
+          <button
+            type="button"
+            onpointerdown={(e) => { e.preventDefault(); handleVirtualKey('TAB'); }}
+            class="h-9 min-w-[44px] px-2.5 rounded-lg bg-[#1a1a28] border border-[#2a2a3d] text-xs font-mono font-semibold text-neutral-200 active:bg-emerald-600 active:text-white transition shrink-0"
+          >
+            TAB
+          </button>
+          <button
+            type="button"
+            onpointerdown={(e) => { e.preventDefault(); handleVirtualKey('MOD_CTRL'); }}
+            class="h-9 min-w-[48px] px-2.5 rounded-lg border text-xs font-mono font-bold transition shrink-0 {ctrlActive ? 'bg-emerald-500 text-black border-emerald-400 shadow-sm shadow-emerald-500/30' : 'bg-[#1a1a28] border-[#2a2a3d] text-emerald-400'}"
+          >
+            CTRL
+          </button>
+          <button
+            type="button"
+            onpointerdown={(e) => { e.preventDefault(); handleVirtualKey('MOD_ALT'); }}
+            class="h-9 min-w-[44px] px-2.5 rounded-lg border text-xs font-mono font-bold transition shrink-0 {altActive ? 'bg-cyan-500 text-black border-cyan-400 shadow-sm shadow-cyan-500/30' : 'bg-[#1a1a28] border-[#2a2a3d] text-cyan-400'}"
+          >
+            ALT
+          </button>
+          <button
+            type="button"
+            onpointerdown={(e) => { e.preventDefault(); handleVirtualKey('CTRL_C'); }}
+            class="h-9 min-w-[40px] px-2.5 rounded-lg bg-[#1a1a28] border border-rose-500/30 text-xs font-mono font-semibold text-rose-300 active:bg-rose-600 active:text-white transition shrink-0"
+          >
+            ^C
+          </button>
+          <button
+            type="button"
+            onpointerdown={(e) => { e.preventDefault(); handleVirtualKey('CTRL_D'); }}
+            class="h-9 min-w-[40px] px-2.5 rounded-lg bg-[#1a1a28] border border-[#2a2a3d] text-xs font-mono text-neutral-300 active:bg-emerald-600 active:text-white transition shrink-0"
+          >
+            ^D
+          </button>
+          <button
+            type="button"
+            onpointerdown={(e) => { e.preventDefault(); handleVirtualKey('CTRL_Z'); }}
+            class="h-9 min-w-[40px] px-2.5 rounded-lg bg-[#1a1a28] border border-[#2a2a3d] text-xs font-mono text-neutral-300 active:bg-emerald-600 active:text-white transition shrink-0"
+          >
+            ^Z
+          </button>
+          <button
+            type="button"
+            onpointerdown={(e) => { e.preventDefault(); handleVirtualKey('CTRL_L'); }}
+            class="h-9 min-w-[40px] px-2.5 rounded-lg bg-[#1a1a28] border border-[#2a2a3d] text-xs font-mono text-neutral-300 active:bg-emerald-600 active:text-white transition shrink-0"
+          >
+            ^L
+          </button>
+          {#each ['/', '-', '|', '~', ':'] as sym}
+            <button
+              type="button"
+              onpointerdown={(e) => { e.preventDefault(); handleVirtualKey(sym); }}
+              class="h-9 min-w-[38px] px-2.5 rounded-lg bg-[#1a1a28] border border-[#2a2a3d] text-xs font-mono text-neutral-200 active:bg-emerald-600 active:text-white transition shrink-0"
+            >
+              {sym}
+            </button>
+          {/each}
+        </div>
+
+        <!-- Row 2: Pinned Navigation & Dedicated Arrow Keys Cluster (Always visible without scrolling) -->
+        <div class="flex items-center justify-between gap-1.5">
+          <div class="flex items-center gap-1 overflow-x-auto no-scrollbar">
+            <button
+              type="button"
+              onpointerdown={(e) => { e.preventDefault(); toggleDockPosition(); }}
+              class="h-9 px-2 rounded-lg bg-[#161622] border border-[#28283a] text-[10px] font-semibold text-neutral-400 active:text-white shrink-0"
+              title="Move special keys bar to Top or Bottom"
+            >
+              {dockTop ? '↓ Bottom' : '↑ Top'}
+            </button>
+            <button
+              type="button"
+              onpointerdown={(e) => { e.preventDefault(); handleVirtualKey('HOME'); }}
+              class="h-9 px-2 rounded-lg bg-[#181824] border border-[#252538] text-[10px] font-mono text-neutral-300 active:bg-emerald-600 active:text-white shrink-0"
+            >
+              HOME
+            </button>
+            <button
+              type="button"
+              onpointerdown={(e) => { e.preventDefault(); handleVirtualKey('END'); }}
+              class="h-9 px-2 rounded-lg bg-[#181824] border border-[#252538] text-[10px] font-mono text-neutral-300 active:bg-emerald-600 active:text-white shrink-0"
+            >
+              END
+            </button>
+            <button
+              type="button"
+              onpointerdown={(e) => { e.preventDefault(); handleVirtualKey('PGUP'); }}
+              class="h-9 px-2 rounded-lg bg-[#181824] border border-[#252538] text-[10px] font-mono text-neutral-300 active:bg-emerald-600 active:text-white shrink-0"
+            >
+              PGUP
+            </button>
+            <button
+              type="button"
+              onpointerdown={(e) => { e.preventDefault(); handleVirtualKey('PGDN'); }}
+              class="h-9 px-2 rounded-lg bg-[#181824] border border-[#252538] text-[10px] font-mono text-neutral-300 active:bg-emerald-600 active:text-white shrink-0"
+            >
+              PGDN
+            </button>
+          </div>
+
+          <!-- Pinned Arrow Keys Cluster -->
+          <div class="flex items-center gap-1.5 shrink-0">
+            <button
+              type="button"
+              onpointerdown={(e) => { e.preventDefault(); handleVirtualKey('LEFT'); }}
+              class="h-9 w-11 rounded-lg bg-[#1e1e30] border border-emerald-500/30 text-sm font-mono font-bold text-white active:bg-emerald-500 active:text-black transition flex items-center justify-center"
+              aria-label="Left Arrow"
+            >
+              ←
+            </button>
+            <button
+              type="button"
+              onpointerdown={(e) => { e.preventDefault(); handleVirtualKey('DOWN'); }}
+              class="h-9 w-11 rounded-lg bg-[#1e1e30] border border-emerald-500/30 text-sm font-mono font-bold text-white active:bg-emerald-500 active:text-black transition flex items-center justify-center"
+              aria-label="Down Arrow"
+            >
+              ↓
+            </button>
+            <button
+              type="button"
+              onpointerdown={(e) => { e.preventDefault(); handleVirtualKey('UP'); }}
+              class="h-9 w-11 rounded-lg bg-[#1e1e30] border border-emerald-500/30 text-sm font-mono font-bold text-white active:bg-emerald-500 active:text-black transition flex items-center justify-center"
+              aria-label="Up Arrow"
+            >
+              ↑
+            </button>
+            <button
+              type="button"
+              onpointerdown={(e) => { e.preventDefault(); handleVirtualKey('RIGHT'); }}
+              class="h-9 w-11 rounded-lg bg-[#1e1e30] border border-emerald-500/30 text-sm font-mono font-bold text-white active:bg-emerald-500 active:text-black transition flex items-center justify-center"
+              aria-label="Right Arrow"
+            >
+              →
+            </button>
+          </div>
+        </div>
+      </div>
+    {:else}
+      <!-- Desktop 1-Row Compact Virtual Key Bar -->
+      <div class="flex items-center gap-1.5 overflow-x-auto no-scrollbar py-1.5 px-2 bg-[#0e0e14] {dockTop ? 'border-b' : 'border-t'} border-[#1f1f2a] shrink-0 select-none">
+        {#each [
+          { k: 'ESC', l: 'ESC' },
+          { k: 'TAB', l: 'TAB' },
+          { k: 'CTRL_C', l: '^C', danger: true },
+          { k: 'CTRL_D', l: '^D' },
+          { k: 'CTRL_Z', l: '^Z' },
+          { k: 'UP', l: '↑' },
+          { k: 'DOWN', l: '↓' },
+          { k: 'LEFT', l: '←' },
+          { k: 'RIGHT', l: '→' },
+          { k: 'HOME', l: 'HOME' },
+          { k: 'END', l: 'END' },
+          { k: '/', l: '/' },
+          { k: '|', l: '|' },
+          { k: '~', l: '~' },
+          { k: '-', l: '-' },
+          { k: ':', l: ':' }
+        ] as btn}
+          <button
+            type="button"
+            onpointerdown={(e) => { e.preventDefault(); handleVirtualKey(btn.k); }}
+            class="h-7 min-w-[32px] px-2.5 rounded bg-[#181824] border border-[#252538] text-[11px] font-mono {btn.danger ? 'text-rose-300 hover:text-rose-200 active:bg-rose-600' : 'text-neutral-300 hover:text-white active:bg-emerald-600'} active:text-white transition shrink-0"
+          >
+            {btn.l}
+          </button>
+        {/each}
+      </div>
+    {/if}
+  {/snippet}
+
+  {#if showAccessoryBar && dockTop}
+    {@render accessoryBarSnippet()}
+  {/if}
+
   <!-- Terminal Connection States & xterm Mount Area -->
-  <div class="relative flex-1 p-2">
+  <div class="relative flex-1 min-h-0 overflow-hidden p-1.5 sm:p-2">
     {#if connectionState === 'connecting'}
       <div class="absolute inset-0 z-10 flex flex-col items-center justify-center bg-[#0a0a0c]/80 backdrop-blur-xs gap-3">
         <RefreshCw class="h-6 w-6 animate-spin text-emerald-400" />
@@ -392,110 +626,7 @@
     <div bind:this={terminalContainer} class="h-full w-full"></div>
   </div>
 
-  {#if showAccessoryBar}
-    <!-- Mobile & Touch Virtual Key Accessory Bar -->
-    {@const hClass = platform.isHandheld ? 'h-9 min-w-[40px]' : 'h-7 min-w-[32px]'}
-    <div class="flex items-center gap-1.5 overflow-x-auto no-scrollbar py-1.5 px-2 bg-[#0e0e14] border-t border-[#1f1f2a] shrink-0 select-none">
-      <button
-        type="button"
-        onclick={() => handleVirtualKey('ESC')}
-        class="{hClass} px-2.5 rounded bg-[#181824] border border-[#252538] text-[11px] font-mono text-neutral-300 hover:text-white active:bg-emerald-600 active:text-white transition shrink-0"
-      >
-        ESC
-      </button>
-      <button
-        type="button"
-        onclick={() => handleVirtualKey('TAB')}
-        class="{hClass} px-2.5 rounded bg-[#181824] border border-[#252538] text-[11px] font-mono text-neutral-300 hover:text-white active:bg-emerald-600 active:text-white transition shrink-0"
-      >
-        TAB
-      </button>
-      <button
-        type="button"
-        onclick={() => handleVirtualKey('CTRL_C')}
-        class="{hClass} px-2.5 rounded bg-[#181824] border border-[#252538] text-[11px] font-mono text-rose-300 hover:text-rose-200 active:bg-rose-600 active:text-white transition shrink-0"
-      >
-        ^C
-      </button>
-      <button
-        type="button"
-        onclick={() => handleVirtualKey('CTRL_D')}
-        class="{hClass} px-2.5 rounded bg-[#181824] border border-[#252538] text-[11px] font-mono text-neutral-300 hover:text-white active:bg-emerald-600 active:text-white transition shrink-0"
-      >
-        ^D
-      </button>
-      <button
-        type="button"
-        onclick={() => handleVirtualKey('CTRL_Z')}
-        class="{hClass} px-2.5 rounded bg-[#181824] border border-[#252538] text-[11px] font-mono text-neutral-300 hover:text-white active:bg-emerald-600 active:text-white transition shrink-0"
-      >
-        ^Z
-      </button>
-      <div class="h-4 w-px bg-[#252538] mx-0.5 shrink-0"></div>
-      <button
-        type="button"
-        onclick={() => handleVirtualKey('UP')}
-        class="{hClass} px-2 rounded bg-[#181824] border border-[#252538] text-xs font-mono text-neutral-300 hover:text-white active:bg-emerald-600 active:text-white transition shrink-0"
-      >
-        ↑
-      </button>
-      <button
-        type="button"
-        onclick={() => handleVirtualKey('DOWN')}
-        class="{hClass} px-2 rounded bg-[#181824] border border-[#252538] text-xs font-mono text-neutral-300 hover:text-white active:bg-emerald-600 active:text-white transition shrink-0"
-      >
-        ↓
-      </button>
-      <button
-        type="button"
-        onclick={() => handleVirtualKey('LEFT')}
-        class="{hClass} px-2 rounded bg-[#181824] border border-[#252538] text-xs font-mono text-neutral-300 hover:text-white active:bg-emerald-600 active:text-white transition shrink-0"
-      >
-        ←
-      </button>
-      <button
-        type="button"
-        onclick={() => handleVirtualKey('RIGHT')}
-        class="{hClass} px-2 rounded bg-[#181824] border border-[#252538] text-xs font-mono text-neutral-300 hover:text-white active:bg-emerald-600 active:text-white transition shrink-0"
-      >
-        →
-      </button>
-      <div class="h-4 w-px bg-[#252538] mx-0.5 shrink-0"></div>
-      <button
-        type="button"
-        onclick={() => handleVirtualKey('/')}
-        class="{hClass} px-2 rounded bg-[#181824] border border-[#252538] text-xs font-mono text-neutral-300 hover:text-white active:bg-emerald-600 active:text-white transition shrink-0"
-      >
-        /
-      </button>
-      <button
-        type="button"
-        onclick={() => handleVirtualKey('|')}
-        class="{hClass} px-2 rounded bg-[#181824] border border-[#252538] text-xs font-mono text-neutral-300 hover:text-white active:bg-emerald-600 active:text-white transition shrink-0"
-      >
-        |
-      </button>
-      <button
-        type="button"
-        onclick={() => handleVirtualKey('~')}
-        class="{hClass} px-2 rounded bg-[#181824] border border-[#252538] text-xs font-mono text-neutral-300 hover:text-white active:bg-emerald-600 active:text-white transition shrink-0"
-      >
-        ~
-      </button>
-      <button
-        type="button"
-        onclick={() => handleVirtualKey('-')}
-        class="{hClass} px-2 rounded bg-[#181824] border border-[#252538] text-xs font-mono text-neutral-300 hover:text-white active:bg-emerald-600 active:text-white transition shrink-0"
-      >
-        -
-      </button>
-      <button
-        type="button"
-        onclick={() => handleVirtualKey(':')}
-        class="{hClass} px-2 rounded bg-[#181824] border border-[#252538] text-xs font-mono text-neutral-300 hover:text-white active:bg-emerald-600 active:text-white transition shrink-0"
-      >
-        :
-      </button>
-    </div>
+  {#if showAccessoryBar && !dockTop}
+    {@render accessoryBarSnippet()}
   {/if}
 </div>

@@ -489,7 +489,7 @@
   }
 
   let hideMobileBottomNav = $derived(
-    platform.isMobile && platform.isKeyboardOpen && activeNav === 'terminal'
+    platform.isMobile && (platform.isKeyboardOpen || platform.isInputFocused) && activeNav === 'terminal'
   );
 
   onMount(() => {
@@ -528,7 +528,7 @@
   {/if}
 
   <!-- Main Viewport Area -->
-  <main class="flex flex-1 flex-col overflow-hidden {platform.isMobile && !hideMobileBottomNav ? 'pb-[calc(4rem+var(--sab))]' : 'pb-0'}">
+  <main class="flex flex-1 flex-col min-w-0 min-h-0 overflow-hidden">
     <!-- Top Header & Tabs Bar -->
     {#if platform.isMobile}
       {@const navTitles: Record<string, string> = {
@@ -726,7 +726,7 @@
     {/if}
 
     <!-- Dynamic Screen Content -->
-    <div class="flex-1 overflow-hidden bg-[#0a0a0c]">
+    <div class="flex-1 min-h-0 overflow-hidden bg-[#0a0a0c]">
       {#if !isAuthenticated}
         <!-- Initial Setup / Connection Mode Screen -->
         <div class="flex h-full items-center justify-center p-6 overflow-y-auto">
@@ -1248,7 +1248,7 @@
               />
             </div>
             <div class="pt-2 border-t border-[#20202c] flex items-center justify-between">
-              <span class="text-neutral-400 font-mono text-[11px]">OpenTermius v0.1.3</span>
+              <span class="text-neutral-400 font-mono text-[11px]">OpenTermius v0.1.4</span>
               <button
                 type="button"
                 onclick={handleSignOut}
@@ -1262,6 +1262,72 @@
         {/if}
       {/if}
     </div>
+
+    <!-- Mobile Bottom Navigation Bar (Flex child at bottom of main — never overlaps terminal/special keys) -->
+    {#if isAuthenticated && platform.isMobile && !hideMobileBottomNav}
+      {@const isMoreActive = ['more', 'vaults', 'keychain', 'identities', 'snippets', 'logs', 'settings'].includes(activeNav)}
+      <nav class="shrink-0 h-16 bg-[#0e0e14]/95 backdrop-blur-md border-t border-[#1f1f2a] flex items-center justify-around z-30 px-1 select-none">
+        <button
+          type="button"
+          onclick={() => (activeNav = 'hosts')}
+          class="flex flex-col items-center justify-center flex-1 py-1 {activeNav === 'hosts' ? 'text-emerald-400 font-medium' : 'text-neutral-400'}"
+        >
+          <div class="px-4 py-1 rounded-full transition {activeNav === 'hosts' ? 'bg-emerald-500/20' : ''}">
+            <Server class="h-4.5 w-4.5" />
+          </div>
+          <span class="text-[11px] mt-0.5">Hosts</span>
+        </button>
+
+        <button
+          type="button"
+          onclick={() => (activeNav = 'terminal')}
+          class="relative flex flex-col items-center justify-center flex-1 py-1 {activeNav === 'terminal' ? 'text-emerald-400 font-medium' : 'text-neutral-400'}"
+        >
+          <div class="relative px-4 py-1 rounded-full transition {activeNav === 'terminal' ? 'bg-emerald-500/20' : ''}">
+            <Terminal class="h-4.5 w-4.5" />
+            {#if terminalStore.tabCount > 0}
+              <span class="absolute -top-0.5 right-1.5 h-4 min-w-[16px] px-1 rounded-full bg-emerald-500 text-black text-[9px] font-bold flex items-center justify-center">
+                {terminalStore.tabCount}
+              </span>
+            {/if}
+          </div>
+          <span class="text-[11px] mt-0.5">Terminal</span>
+        </button>
+
+        <button
+          type="button"
+          onclick={() => (activeNav = 'sftp')}
+          class="flex flex-col items-center justify-center flex-1 py-1 {activeNav === 'sftp' ? 'text-emerald-400 font-medium' : 'text-neutral-400'}"
+        >
+          <div class="px-4 py-1 rounded-full transition {activeNav === 'sftp' ? 'bg-emerald-500/20' : ''}">
+            <Folder class="h-4.5 w-4.5" />
+          </div>
+          <span class="text-[11px] mt-0.5">SFTP</span>
+        </button>
+
+        <button
+          type="button"
+          onclick={() => (activeNav = 'tunnels')}
+          class="flex flex-col items-center justify-center flex-1 py-1 {activeNav === 'tunnels' ? 'text-emerald-400 font-medium' : 'text-neutral-400'}"
+        >
+          <div class="px-4 py-1 rounded-full transition {activeNav === 'tunnels' ? 'bg-emerald-500/20' : ''}">
+            <Network class="h-4.5 w-4.5" />
+          </div>
+          <span class="text-[11px] mt-0.5">Tunnels</span>
+        </button>
+
+        <button
+          type="button"
+          onclick={() => (activeNav = 'more')}
+          class="flex flex-col items-center justify-center flex-1 py-1 {isMoreActive ? 'text-emerald-400 font-medium' : 'text-neutral-400'}"
+        >
+          <div class="px-4 py-1 rounded-full transition {isMoreActive ? 'bg-emerald-500/20' : ''}">
+            <LayoutGrid class="h-4.5 w-4.5" />
+          </div>
+          <span class="text-[11px] mt-0.5">More</span>
+        </button>
+      </nav>
+    {/if}
   </main>
 
   <!-- Mobile Floating Action Button (FAB) on Hosts screen -->
@@ -1364,72 +1430,6 @@
         </button>
       </div>
     </div>
-  {/if}
-
-  <!-- Mobile Bottom Navigation Bar (Material 3 style) -->
-  {#if isAuthenticated && platform.isMobile && !hideMobileBottomNav}
-    {@const isMoreActive = ['more', 'vaults', 'keychain', 'identities', 'snippets', 'logs', 'settings'].includes(activeNav)}
-    <nav class="fixed bottom-0 left-0 right-0 h-[calc(4rem+var(--sab))] pb-[var(--sab)] bg-[#0e0e14]/95 backdrop-blur-md border-t border-[#1f1f2a] flex items-center justify-around z-30 px-1 select-none">
-      <button
-        type="button"
-        onclick={() => (activeNav = 'hosts')}
-        class="flex flex-col items-center justify-center flex-1 py-1 {activeNav === 'hosts' ? 'text-emerald-400 font-medium' : 'text-neutral-400'}"
-      >
-        <div class="px-4 py-1 rounded-full transition {activeNav === 'hosts' ? 'bg-emerald-500/20' : ''}">
-          <Server class="h-4.5 w-4.5" />
-        </div>
-        <span class="text-[11px] mt-0.5">Hosts</span>
-      </button>
-
-      <button
-        type="button"
-        onclick={() => (activeNav = 'terminal')}
-        class="relative flex flex-col items-center justify-center flex-1 py-1 {activeNav === 'terminal' ? 'text-emerald-400 font-medium' : 'text-neutral-400'}"
-      >
-        <div class="relative px-4 py-1 rounded-full transition {activeNav === 'terminal' ? 'bg-emerald-500/20' : ''}">
-          <Terminal class="h-4.5 w-4.5" />
-          {#if terminalStore.tabCount > 0}
-            <span class="absolute -top-0.5 right-1.5 h-4 min-w-[16px] px-1 rounded-full bg-emerald-500 text-black text-[9px] font-bold flex items-center justify-center">
-              {terminalStore.tabCount}
-            </span>
-          {/if}
-        </div>
-        <span class="text-[11px] mt-0.5">Terminal</span>
-      </button>
-
-      <button
-        type="button"
-        onclick={() => (activeNav = 'sftp')}
-        class="flex flex-col items-center justify-center flex-1 py-1 {activeNav === 'sftp' ? 'text-emerald-400 font-medium' : 'text-neutral-400'}"
-      >
-        <div class="px-4 py-1 rounded-full transition {activeNav === 'sftp' ? 'bg-emerald-500/20' : ''}">
-          <Folder class="h-4.5 w-4.5" />
-        </div>
-        <span class="text-[11px] mt-0.5">SFTP</span>
-      </button>
-
-      <button
-        type="button"
-        onclick={() => (activeNav = 'tunnels')}
-        class="flex flex-col items-center justify-center flex-1 py-1 {activeNav === 'tunnels' ? 'text-emerald-400 font-medium' : 'text-neutral-400'}"
-      >
-        <div class="px-4 py-1 rounded-full transition {activeNav === 'tunnels' ? 'bg-emerald-500/20' : ''}">
-          <Network class="h-4.5 w-4.5" />
-        </div>
-        <span class="text-[11px] mt-0.5">Tunnels</span>
-      </button>
-
-      <button
-        type="button"
-        onclick={() => (activeNav = 'more')}
-        class="flex flex-col items-center justify-center flex-1 py-1 {isMoreActive ? 'text-emerald-400 font-medium' : 'text-neutral-400'}"
-      >
-        <div class="px-4 py-1 rounded-full transition {isMoreActive ? 'bg-emerald-500/20' : ''}">
-          <LayoutGrid class="h-4.5 w-4.5" />
-        </div>
-        <span class="text-[11px] mt-0.5">More</span>
-      </button>
-    </nav>
   {/if}
 
   <!-- Modals -->

@@ -118,3 +118,6 @@ Output APK:
 - [API & WebSocket Specifications](docs/api.md)
 - [Security & Cryptography Model](docs/security.md)
 - [Architecture Decision Records](docs/decisions/)
+
+## License
+Licensed under the [Apache License, Version 2.0](LICENSE). Copyright 2026 wisnu-w (OpenTermius Contributors).
