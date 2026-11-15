@@ -1,5 +1,7 @@
 # OpenTermius
 
+**Website:** https://wisnu-w.github.io/OpenTermius/ · **Download:** [Latest release](https://github.com/wisnu-w/OpenTermius/releases/latest)
+
 OpenTermius is a 100% free, self-hostable, open-source alternative to Termius. It provides modern SSH terminal management, end-to-end encrypted personal and team vaults, real-time terminal multiplayer, startup snippet automation, and session logging without any commercial paywalls or subscriptions.
 
 ## Features
