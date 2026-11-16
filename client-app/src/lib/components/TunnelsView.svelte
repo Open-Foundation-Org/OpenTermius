@@ -1,5 +1,6 @@
 <script lang="ts">
   import { toast } from '../stores/toast.svelte';
+  import { encryptVaultPayload, decryptVaultPayload } from '../crypto/vault';
   import {
     Network,
     Plus,
@@ -79,11 +80,11 @@
       const items = await api.getVaultItems(targetVaultId);
       const tunnelItems = items.filter((item) => item.kind === 'tunnel');
 
+      const secret = api.getVaultSecret(targetVaultId);
       const loaded: TunnelConfig[] = [];
       for (const item of tunnelItems) {
-        try {
-          const raw = atob(item.ciphertext);
-          const parsed = JSON.parse(raw);
+        const parsed = await decryptVaultPayload<any>(item.ciphertext, item.nonce, secret);
+        if (parsed) {
           const matchedHost = hosts.find((h) => h.id === parsed.hostId);
           loaded.push({
             id: item.id,
@@ -97,7 +98,7 @@
             autoConnect: parsed.autoConnect || false,
             isActive: false
           });
-        } catch {
+        } else {
           loaded.push({
             id: item.id,
             label: item.label,
@@ -172,8 +173,7 @@
         autoConnect: newAutoConnect
       };
 
-      const ciphertext = btoa(JSON.stringify(payload));
-      const nonce = btoa(crypto.randomUUID().slice(0, 12));
+      const { ciphertext, nonce } = await encryptVaultPayload(payload, api.getVaultSecret(targetVaultId));
 
       const created = await api.createVaultItem(targetVaultId, {
         kind: 'tunnel',

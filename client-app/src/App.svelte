@@ -15,10 +15,12 @@
   import TunnelsView from './lib/components/TunnelsView.svelte';
   import SftpView from './lib/components/SftpView.svelte';
   import ToastContainer from './lib/components/ToastContainer.svelte';
+  import BootSplash from './lib/components/BootSplash.svelte';
   import { terminalStore } from './lib/stores/terminal.svelte';
   import { platform } from './lib/stores/platform.svelte';
   import { toast, formatErrorMessage } from './lib/stores/toast.svelte';
   import { api, type ApiVault, type ApiVaultItem } from './lib/api/client';
+  import { encryptVaultPayload, decryptVaultPayload } from './lib/crypto/vault';
   import {
     Plus,
     Search,
@@ -68,6 +70,8 @@
   let isSidebarCollapsed = $state(false);
   let isMobileMenuOpen = $state(false);
   let isSessionSwitcherOpen = $state(false);
+  let isVaultSwitcherOpen = $state(false);
+  let showBootSplash = $state(true);
   let sftpSelectedHostId = $state('');
 
   function handleOpenSftp(host: any) {
@@ -203,50 +207,30 @@
         return;
       }
 
-      hosts = items.map((item) => {
-        let address = '127.0.0.1';
-        let port = 22;
-        let username = 'root';
-        let authType: 'password' | 'key' = 'password';
-        let password = '';
-        let privateKey = '';
-        let passphrase = '';
-        let tags: string[] = [];
-        let group = 'Default';
-        let useMosh = false;
-
-        try {
-          const parsed = JSON.parse(atob(item.ciphertext));
-          address = parsed.address || '127.0.0.1';
-          port = parsed.port || 22;
-          username = parsed.username || 'root';
-          authType = parsed.authType || 'password';
-          password = parsed.password || '';
-          privateKey = parsed.privateKey || '';
-          passphrase = parsed.passphrase || '';
-          tags = parsed.tags || [];
-          group = parsed.group || 'Default';
-          useMosh = !!parsed.useMosh;
-        } catch {
-          // fallback
-        }
-
-        return {
-          id: item.id,
-          label: item.label,
-          address,
-          port,
-          username,
-          authType,
-          password,
-          privateKey,
-          passphrase,
-          tags,
-          group,
-          useMosh,
-          pingMs: Math.floor(Math.random() * 20) + 10
-        };
-      });
+      hosts = await Promise.all(
+        items.map(async (item) => {
+          const parsed = await decryptVaultPayload<any>(
+            item.ciphertext,
+            item.nonce,
+            activeVault?.encrypted_key
+          );
+          return {
+            id: item.id,
+            label: item.label,
+            address: parsed?.address || '127.0.0.1',
+            port: parsed?.port || 22,
+            username: parsed?.username || 'root',
+            authType: parsed?.authType || 'password',
+            password: parsed?.password || '',
+            privateKey: parsed?.privateKey || '',
+            passphrase: parsed?.passphrase || '',
+            tags: parsed?.tags || [],
+            group: parsed?.group || 'Default',
+            useMosh: !!parsed?.useMosh,
+            pingMs: Math.floor(Math.random() * 20) + 10
+          };
+        })
+      );
 
       loadState = 'success';
     } catch (err: unknown) {
@@ -313,8 +297,7 @@
         useMosh: hostData.useMosh
       };
 
-      const ciphertext = btoa(JSON.stringify(payload));
-      const nonce = btoa(crypto.randomUUID().slice(0, 12));
+      const { ciphertext, nonce } = await encryptVaultPayload(payload, activeVault.encrypted_key);
       const isExistingHost = Boolean(editingHost || (hostData.id && hosts.some((h) => h.id === hostData.id)));
 
       if (isExistingHost) {
@@ -392,11 +375,32 @@
     if (!targetHost || !sourceVault) return;
     try {
       await api.moveVaultItem(sourceVault.id, targetHost.id, targetVaultId);
+      const targetVault = vaults.find((v) => v.id === targetVaultId);
+      if (targetVault && targetVault.encrypted_key !== sourceVault.encrypted_key) {
+        const payload = {
+          address: targetHost.address,
+          port: targetHost.port,
+          username: targetHost.username,
+          authType: targetHost.authType,
+          password: targetHost.password,
+          privateKey: targetHost.privateKey,
+          passphrase: targetHost.passphrase,
+          tags: targetHost.tags,
+          group: targetHost.group,
+          useMosh: targetHost.useMosh
+        };
+        const { ciphertext, nonce } = await encryptVaultPayload(payload, targetVault.encrypted_key);
+        await api.updateVaultItem(targetVaultId, targetHost.id, {
+          label: targetHost.label,
+          ciphertext,
+          nonce
+        });
+      }
       hosts = hosts.filter((h) => h.id !== targetHost.id);
       if (hosts.length === 0) {
         loadState = 'empty';
       }
-      const targetVaultName = vaults.find((v) => v.id === targetVaultId)?.name || 'target vault';
+      const targetVaultName = targetVault?.name || 'target vault';
       toast.success(`Transferred "${targetHost.label}" to ${targetVaultName}.`);
     } catch (err: unknown) {
       toast.error(err, 'Failed to move host to vault');
@@ -413,9 +417,9 @@
       port: host.port,
       username: host.username,
       authType: host.authType,
-      password: host.password,
-      privateKey: host.privateKey,
-      passphrase: host.passphrase
+      password: host.authType === 'key' ? '' : host.password,
+      privateKey: host.authType === 'key' ? host.privateKey : '',
+      passphrase: host.authType === 'key' ? host.passphrase : ''
     });
     activeNav = 'terminal';
   }
@@ -455,8 +459,7 @@
         privateKey: h.privateKey || '',
         passphrase: h.passphrase || ''
       };
-      const ciphertext = btoa(JSON.stringify(payload));
-      const nonce = btoa(crypto.randomUUID().slice(0, 12));
+      const { ciphertext, nonce } = await encryptVaultPayload(payload, activeVault.encrypted_key);
       await api.createVaultItem(activeVault.id, {
         kind: 'host',
         label: h.label,
@@ -501,10 +504,41 @@
     const syncTimer = setInterval(silentBackgroundSync, 15000);
     const onFocus = () => void silentBackgroundSync();
     window.addEventListener('focus', onFocus);
+
+    let lastBackMs = 0;
+    const onAndroidBack = () => {
+      if (isAddHostOpen) { isAddHostOpen = false; editingHost = null; return; }
+      if (isMoveModalOpen) { isMoveModalOpen = false; movingHost = null; return; }
+      if (isImportOpen) { isImportOpen = false; return; }
+      if (isMultiplayerOpen) { isMultiplayerOpen = false; return; }
+      if (isSessionSwitcherOpen) { isSessionSwitcherOpen = false; return; }
+      if (isVaultSwitcherOpen) { isVaultSwitcherOpen = false; return; }
+
+      const subPages = ['vaults', 'keychain', 'identities', 'snippets', 'logs', 'settings'];
+      if (subPages.includes(activeNav)) {
+        activeNav = 'more';
+        return;
+      }
+      if (activeNav !== 'hosts') {
+        activeNav = 'hosts';
+        return;
+      }
+
+      const now = Date.now();
+      if (now - lastBackMs < 2000) {
+        (window as any).AndroidClipboard?.moveToBackground?.();
+      } else {
+        lastBackMs = now;
+        toast.info('Swipe back again to minimize');
+      }
+    };
+    window.addEventListener('opentermius:android-back', onAndroidBack);
+
     return () => {
       unsubSync();
       clearInterval(syncTimer);
       window.removeEventListener('focus', onFocus);
+      window.removeEventListener('opentermius:android-back', onAndroidBack);
     };
   });
 </script>
@@ -561,8 +595,21 @@
           {#if activeNav === 'terminal'}
             <button
               type="button"
+              onpointerdown={(e) => {
+                e.preventDefault();
+                (document.activeElement as HTMLElement | null)?.blur?.();
+                activeNav = 'hosts';
+              }}
+              class="flex h-10 w-10 -ml-1.5 items-center justify-center rounded-xl text-neutral-300 active:bg-[#1a1a24] transition shrink-0"
+              aria-label="Back to Hosts"
+              title="Back to Hosts"
+            >
+              <ArrowLeft class="h-5 w-5" />
+            </button>
+            <button
+              type="button"
               onclick={() => (isSessionSwitcherOpen = true)}
-              class="flex items-center gap-2 max-w-[220px] rounded-full bg-[#161620] border border-[#282838] px-3.5 py-1.5 text-xs font-semibold text-white active:scale-95 transition"
+              class="flex items-center gap-2 max-w-[200px] rounded-full bg-[#161620] border border-[#282838] px-3.5 py-1.5 text-xs font-semibold text-white active:scale-95 transition"
             >
               <span class="h-2 w-2 rounded-full bg-emerald-400 shrink-0"></span>
               <span class="truncate">{activeTab ? activeTab.label : 'Terminal'}</span>
@@ -573,9 +620,14 @@
               {navTitles[activeNav] ?? 'OpenTermius'}
             </h1>
             {#if activeNav === 'hosts' && activeVault}
-              <span class="ml-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 text-[10px] font-medium text-emerald-400 truncate max-w-[110px]">
-                {activeVault.name}
-              </span>
+              <button
+                type="button"
+                onclick={() => (isVaultSwitcherOpen = true)}
+                class="ml-1 flex items-center gap-1 rounded-full bg-emerald-500/10 border border-emerald-500/25 px-2.5 py-1 text-[11px] font-medium text-emerald-400 active:scale-95 transition max-w-[140px]"
+              >
+                <span class="truncate">{activeVault.name}</span>
+                <ChevronDown class="h-3 w-3 shrink-0" />
+              </button>
             {/if}
           {/if}
         </div>
@@ -909,27 +961,37 @@
         </div>
       {:else}
         <!-- Hosts Inventory Screen (Persistent in DOM) -->
-        <div class="h-full w-full flex-col p-3 sm:p-6 overflow-y-auto space-y-6 {activeNav === 'hosts' ? 'flex' : 'hidden'}">
+        <div class="h-full w-full flex-col p-3 pb-24 sm:p-6 overflow-y-auto space-y-4 sm:space-y-6 {activeNav === 'hosts' ? 'flex' : 'hidden'}">
           <!-- Search & Filter Controls -->
           <div class="space-y-3">
-            <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 sm:gap-3">
               <div class="relative flex-1 max-w-md">
-                <Search class="absolute left-3 top-2.5 h-4 w-4 text-neutral-500" />
+                <Search class="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-neutral-500" />
                 <input
                   type="text"
                   bind:value={searchQuery}
-                  placeholder="Search hosts by label, IP address, or tags..."
-                  class="w-full rounded-xl border border-[#22222a] bg-[#121218] pl-9 pr-4 py-2 text-xs text-white placeholder-neutral-500 outline-none focus:border-emerald-500 transition"
+                  placeholder="Search hosts, IP, or tags..."
+                  class="w-full rounded-xl border border-[#22222a] bg-[#121218] pl-9 pr-9 py-2.5 sm:py-2 text-sm sm:text-xs text-white placeholder-neutral-500 outline-none focus:border-emerald-500 transition"
                 />
+                {#if searchQuery}
+                  <button
+                    type="button"
+                    onclick={() => (searchQuery = '')}
+                    class="absolute right-2.5 top-1/2 -translate-y-1/2 rounded-lg p-1 text-neutral-400 hover:text-white"
+                    aria-label="Clear search"
+                  >
+                    <X class="h-3.5 w-3.5" />
+                  </button>
+                {/if}
               </div>
-              <div class="flex items-center gap-2 text-xs text-neutral-400">
+              <div class="flex items-center justify-between sm:justify-start gap-2 text-xs text-neutral-400">
                 <button
                   onclick={loadHosts}
-                  class="flex items-center gap-1 rounded bg-[#181822] px-2.5 py-1.5 text-neutral-300 hover:text-white transition"
+                  class="flex items-center gap-1.5 rounded-lg bg-[#181822] px-3 py-1.5 text-neutral-300 hover:text-white active:scale-95 transition"
                 >
                   <RefreshCw class="h-3 w-3" /> Refresh
                 </button>
-                <span class="font-medium text-white">{filteredHosts.length}</span> hosts in vault
+                <span><span class="font-medium text-white">{filteredHosts.length}</span> hosts in vault</span>
               </div>
             </div>
 
@@ -1001,9 +1063,24 @@
               </button>
             </div>
           {:else}
-            <!-- Collapsible Folders Sections -->
-            <div class="space-y-6">
-              {#each Object.entries(hostsByFolder) as [folderName, folderHosts] (folderName)}
+            <!-- Collapsible Folders Sections (flat list on mobile when only Default folder exists) -->
+            {@const folderEntries = Object.entries(hostsByFolder)}
+            {#if platform.isMobile && folderEntries.length === 1 && folderEntries[0][0] === 'Default'}
+              <div class="space-y-2.5">
+                {#each folderEntries[0][1] as host (host.id)}
+                  <HostCard
+                    {host}
+                    onConnect={handleConnect}
+                    onEdit={handleEditHost}
+                    onDelete={handleDeleteHost}
+                    onMove={handleOpenMoveModal}
+                    onOpenSftp={handleOpenSftp}
+                  />
+                {/each}
+              </div>
+            {:else}
+              <div class="space-y-4 sm:space-y-6">
+                {#each folderEntries as [folderName, folderHosts] (folderName)}
                 <div class="rounded-2xl border border-[#20202e] bg-[#111118] p-4 space-y-4">
                   <!-- Folder Header -->
                   <div class="flex items-center justify-between">
@@ -1058,6 +1135,7 @@
                 </div>
               {/each}
             </div>
+            {/if}
           {/if}
         </div>
 
@@ -1248,7 +1326,7 @@
               />
             </div>
             <div class="pt-2 border-t border-[#20202c] flex items-center justify-between">
-              <span class="text-neutral-400 font-mono text-[11px]">OpenTermius v0.1.4</span>
+              <span class="text-neutral-400 font-mono text-[11px]">OpenTermius v0.1.5</span>
               <button
                 type="button"
                 onclick={handleSignOut}
@@ -1343,6 +1421,61 @@
     >
       <Plus class="h-6 w-6 stroke-[2.5]" />
     </button>
+  {/if}
+
+  <!-- Mobile Vault Switcher Bottom Sheet -->
+  {#if platform.isMobile && isVaultSwitcherOpen}
+    <div
+      class="fixed inset-0 z-50 flex flex-col justify-end bg-black/70 backdrop-blur-xs"
+      onclick={() => (isVaultSwitcherOpen = false)}
+      role="presentation"
+    >
+      <div
+        class="rounded-t-3xl border-t border-[#262635] bg-[#12121a] px-4 pt-3 pb-[calc(1.5rem+var(--sab))] space-y-3 shadow-2xl"
+        onclick={(e) => e.stopPropagation()}
+        onkeydown={(e) => { if (e.key === 'Escape') isVaultSwitcherOpen = false; }}
+        role="dialog"
+        tabindex="-1"
+        aria-label="Switch Vault"
+      >
+        <div class="mx-auto h-1 w-10 rounded-full bg-neutral-700"></div>
+        <div class="flex items-center justify-between pt-1">
+          <h2 class="text-sm font-semibold text-white">Switch Vault</h2>
+          <button
+            type="button"
+            onclick={() => (isVaultSwitcherOpen = false)}
+            class="rounded-lg p-1.5 text-neutral-400 active:bg-[#1e1e2c]"
+            aria-label="Close vault switcher"
+          >
+            <X class="h-4 w-4" />
+          </button>
+        </div>
+
+        <div class="max-h-64 overflow-y-auto space-y-2">
+          {#each vaults as v (v.id)}
+            <button
+              type="button"
+              onclick={() => {
+                handleSelectVault(v);
+                isVaultSwitcherOpen = false;
+              }}
+              class="flex w-full items-center justify-between rounded-2xl border px-3.5 py-3 text-left transition {activeVault?.id === v.id ? 'border-emerald-500/40 bg-emerald-500/10 text-white' : 'border-[#222230] bg-[#171722] text-neutral-300'}"
+            >
+              <div class="flex items-center gap-3 min-w-0">
+                <FolderLock class="h-4 w-4 {activeVault?.id === v.id ? 'text-emerald-400' : 'text-neutral-400'} shrink-0" />
+                <div class="min-w-0">
+                  <div class="text-sm font-medium truncate">{v.name}</div>
+                  <div class="text-[11px] text-neutral-400 capitalize">{v.type} vault</div>
+                </div>
+              </div>
+              {#if activeVault?.id === v.id}
+                <CheckCircle2 class="h-4 w-4 text-emerald-400 shrink-0" />
+              {/if}
+            </button>
+          {/each}
+        </div>
+      </div>
+    </div>
   {/if}
 
   <!-- Mobile Terminal Session Switcher Bottom Sheet -->
@@ -1470,4 +1603,8 @@
   />
 
   <ToastContainer />
+
+  {#if showBootSplash}
+    <BootSplash onDone={() => (showBootSplash = false)} />
+  {/if}
 </div>

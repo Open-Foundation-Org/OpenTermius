@@ -340,6 +340,13 @@ class ApiClient {
     return this.standalone;
   }
 
+  getVaultSecret(vaultId?: string): string | undefined {
+    if (!vaultId || typeof window === 'undefined') return undefined;
+    const key = this.standalone ? 'opentermius_local_vaults' : GW_VAULTS_CACHE_KEY;
+    const cached = this.readJson<ApiVault[]>(key, []);
+    return cached.find((v) => v.id === vaultId)?.encrypted_key;
+  }
+
   setStandalone(enabled: boolean) {
     this.standalone = enabled;
     if (typeof window !== 'undefined') {
@@ -734,13 +741,14 @@ class ApiClient {
 
   // Native SFTP File Manager Operations (via Tauri Rust russh-sftp)
   private toNativeSftpConfig(config: SftpHostConfig) {
+    const isKeyAuth = config.authType === 'key';
     return {
       address: config.address,
       port: config.port || 22,
       username: config.username,
-      password: config.password || '',
-      privateKey: config.privateKey || '',
-      passphrase: config.passphrase || ''
+      password: isKeyAuth ? '' : (config.password || ''),
+      privateKey: isKeyAuth ? (config.privateKey || '') : '',
+      passphrase: isKeyAuth ? (config.passphrase || '') : ''
     };
   }
 

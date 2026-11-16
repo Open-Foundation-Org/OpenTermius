@@ -10,9 +10,11 @@
     Trash2,
     FolderInput,
     Folder,
-    MoreVertical
+    MoreVertical,
+    Copy
   } from 'lucide-svelte';
   import { platform } from '../stores/platform.svelte';
+  import { toast } from '../stores/toast.svelte';
 
   interface HostItem {
     id: string;
@@ -41,6 +43,18 @@
 
   let { host, onConnect, onEdit, onDelete, onMove, onOpenSftp }: Props = $props();
   let isMenuOpen = $state(false);
+
+  async function copyHostTarget() {
+    const cmd = host.port && host.port !== 22
+      ? `ssh -p ${host.port} ${host.username}@${host.address}`
+      : `ssh ${host.username}@${host.address}`;
+    try {
+      await navigator.clipboard.writeText(cmd);
+      toast.success(`Copied: ${cmd}`);
+    } catch {
+      toast.error('Clipboard permission unavailable');
+    }
+  }
 </script>
 
 {#if platform.isMobile}
@@ -101,54 +115,76 @@
 
     {#if isMenuOpen}
       <div
-        class="fixed inset-0 z-40"
+        class="fixed inset-0 z-50 flex flex-col justify-end bg-black/70 backdrop-blur-xs"
         onclick={() => (isMenuOpen = false)}
         role="presentation"
-      ></div>
-      <div class="absolute right-2 top-14 z-50 w-44 rounded-2xl border border-[#2a2a38] bg-[#181824] p-1.5 shadow-2xl space-y-0.5 animate-in fade-in zoom-in-95 duration-100">
-        <button
-          type="button"
-          onclick={() => { isMenuOpen = false; onConnect(host); }}
-          class="flex w-full items-center gap-2.5 rounded-xl px-3 py-2.5 text-xs font-medium text-emerald-400 hover:bg-[#222232]"
+      >
+        <div
+          class="rounded-t-3xl border-t border-[#262635] bg-[#14141e] px-4 pt-3 pb-[calc(1.25rem+var(--sab))] space-y-2 shadow-2xl"
+          onclick={(e) => e.stopPropagation()}
+          onkeydown={(e) => { if (e.key === 'Escape') isMenuOpen = false; }}
+          role="dialog"
+          tabindex="-1"
+          aria-label="Host Actions"
         >
-          <Zap class="h-4 w-4" /> Connect SSH
-        </button>
-        {#if onOpenSftp}
-          <button
-            type="button"
-            onclick={() => { isMenuOpen = false; onOpenSftp(host); }}
-            class="flex w-full items-center gap-2.5 rounded-xl px-3 py-2.5 text-xs font-medium text-amber-400 hover:bg-[#222232]"
-          >
-            <Folder class="h-4 w-4" /> Browse SFTP
-          </button>
-        {/if}
-        {#if onEdit}
-          <button
-            type="button"
-            onclick={() => { isMenuOpen = false; onEdit(host); }}
-            class="flex w-full items-center gap-2.5 rounded-xl px-3 py-2.5 text-xs text-neutral-200 hover:bg-[#222232]"
-          >
-            <Pencil class="h-4 w-4" /> Edit Host
-          </button>
-        {/if}
-        {#if onMove}
-          <button
-            type="button"
-            onclick={() => { isMenuOpen = false; onMove(host); }}
-            class="flex w-full items-center gap-2.5 rounded-xl px-3 py-2.5 text-xs text-neutral-200 hover:bg-[#222232]"
-          >
-            <FolderInput class="h-4 w-4" /> Move Host
-          </button>
-        {/if}
-        {#if onDelete}
-          <button
-            type="button"
-            onclick={() => { isMenuOpen = false; onDelete(host); }}
-            class="flex w-full items-center gap-2.5 rounded-xl px-3 py-2.5 text-xs text-rose-400 hover:bg-rose-950/40"
-          >
-            <Trash2 class="h-4 w-4" /> Delete
-          </button>
-        {/if}
+          <div class="mx-auto h-1 w-10 rounded-full bg-neutral-700"></div>
+          <div class="px-1 py-1.5 border-b border-[#222230]">
+            <p class="text-sm font-semibold text-white truncate">{host.label}</p>
+            <p class="text-xs font-mono text-neutral-400 truncate">{host.username}@{host.address}:{host.port}</p>
+          </div>
+          <div class="space-y-1 pt-1">
+            <button
+              type="button"
+              onclick={() => { isMenuOpen = false; onConnect(host); }}
+              class="flex w-full items-center gap-3 rounded-2xl px-3.5 py-3 text-sm font-semibold text-emerald-400 active:bg-[#1e1e2c]"
+            >
+              <Zap class="h-4.5 w-4.5" /> Connect SSH
+            </button>
+            {#if onOpenSftp}
+              <button
+                type="button"
+                onclick={() => { isMenuOpen = false; onOpenSftp(host); }}
+                class="flex w-full items-center gap-3 rounded-2xl px-3.5 py-3 text-sm font-medium text-amber-400 active:bg-[#1e1e2c]"
+              >
+                <Folder class="h-4.5 w-4.5" /> Browse SFTP
+              </button>
+            {/if}
+            <button
+              type="button"
+              onclick={() => { isMenuOpen = false; void copyHostTarget(); }}
+              class="flex w-full items-center gap-3 rounded-2xl px-3.5 py-3 text-sm text-neutral-200 active:bg-[#1e1e2c]"
+            >
+              <Copy class="h-4.5 w-4.5 text-neutral-400" /> Copy SSH Command
+            </button>
+            {#if onEdit}
+              <button
+                type="button"
+                onclick={() => { isMenuOpen = false; onEdit(host); }}
+                class="flex w-full items-center gap-3 rounded-2xl px-3.5 py-3 text-sm text-neutral-200 active:bg-[#1e1e2c]"
+              >
+                <Pencil class="h-4.5 w-4.5 text-neutral-400" /> Edit Host
+              </button>
+            {/if}
+            {#if onMove}
+              <button
+                type="button"
+                onclick={() => { isMenuOpen = false; onMove(host); }}
+                class="flex w-full items-center gap-3 rounded-2xl px-3.5 py-3 text-sm text-neutral-200 active:bg-[#1e1e2c]"
+              >
+                <FolderInput class="h-4.5 w-4.5 text-neutral-400" /> Move Host
+              </button>
+            {/if}
+            {#if onDelete}
+              <button
+                type="button"
+                onclick={() => { isMenuOpen = false; onDelete(host); }}
+                class="flex w-full items-center gap-3 rounded-2xl px-3.5 py-3 text-sm font-medium text-rose-400 active:bg-rose-950/40"
+              >
+                <Trash2 class="h-4.5 w-4.5" /> Delete Host
+              </button>
+            {/if}
+          </div>
+        </div>
       </div>
     {/if}
   </div>

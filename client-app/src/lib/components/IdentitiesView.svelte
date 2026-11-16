@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { api, type ApiVaultItem } from '../api/client';
+  import { encryptVaultPayload, decryptVaultPayload } from '../crypto/vault';
   import { toast, formatErrorMessage } from '../stores/toast.svelte';
   import {
     UserCheck,
@@ -74,22 +75,19 @@
       }
 
       // 1. Fetch available keys in keychain for linking
+      const secret = api.getVaultSecret(vaultId);
       const keyItems = await api.getVaultItems(vaultId, 'key');
-      availableKeys = keyItems.map((k) => {
-        let privateKey = '';
-        let passphrase = '';
-        try {
-          const parsed = JSON.parse(atob(k.ciphertext));
-          privateKey = parsed.privateKey || '';
-          passphrase = parsed.passphrase || '';
-        } catch {}
-        return {
-          id: k.id,
-          label: k.label,
-          privateKey,
-          passphrase
-        };
-      });
+      availableKeys = await Promise.all(
+        keyItems.map(async (k) => {
+          const parsed = await decryptVaultPayload<any>(k.ciphertext, k.nonce, secret);
+          return {
+            id: k.id,
+            label: k.label,
+            privateKey: parsed?.privateKey || '',
+            passphrase: parsed?.passphrase || ''
+          };
+        })
+      );
 
       // 2. Fetch identities
       const items = await api.getVaultItems(vaultId, 'identity');
@@ -99,36 +97,23 @@
         return;
       }
 
-      identities = items.map((item) => {
-        let username = 'root';
-        let authType: 'password' | 'key' = 'password';
-        let password = '';
-        let keyId = '';
-        let keyLabel = '';
-
-        try {
-          const parsed = JSON.parse(atob(item.ciphertext));
-          username = parsed.username || 'root';
-          authType = parsed.authType || 'password';
-          password = parsed.password || '';
-          keyId = parsed.keyId || '';
+      identities = await Promise.all(
+        items.map(async (item) => {
+          const parsed = await decryptVaultPayload<any>(item.ciphertext, item.nonce, secret);
+          const keyId = parsed?.keyId || '';
           const foundKey = availableKeys.find((k) => k.id === keyId);
-          if (foundKey) keyLabel = foundKey.label;
-        } catch {
-          // fallback
-        }
-
-        return {
-          id: item.id,
-          label: item.label,
-          username,
-          authType,
-          password,
-          keyId,
-          keyLabel,
-          createdAt: item.created_at
-        };
-      });
+          return {
+            id: item.id,
+            label: item.label,
+            username: parsed?.username || 'root',
+            authType: parsed?.authType || 'password',
+            password: parsed?.password || '',
+            keyId,
+            keyLabel: foundKey?.label || '',
+            createdAt: item.created_at
+          };
+        })
+      );
 
       state = 'success';
     } catch (err: unknown) {
@@ -170,19 +155,18 @@
     isSaving = true;
 
     try {
-      const selectedKey = availableKeys.find((k) => k.id === selectedKeyId);
+      const selectedKey = newAuthType === 'key' ? availableKeys.find((k) => k.id === selectedKeyId) : undefined;
 
       const payload = {
         username: newUsername.trim(),
         authType: newAuthType,
-        password: newPassword,
-        keyId: selectedKeyId,
-        privateKey: selectedKey?.privateKey || '',
-        passphrase: selectedKey?.passphrase || ''
+        password: newAuthType === 'password' ? newPassword : '',
+        keyId: newAuthType === 'key' ? selectedKeyId : '',
+        privateKey: newAuthType === 'key' ? (selectedKey?.privateKey || '') : '',
+        passphrase: newAuthType === 'key' ? (selectedKey?.passphrase || '') : ''
       };
 
-      const ciphertext = btoa(JSON.stringify(payload));
-      const nonce = btoa(crypto.randomUUID().slice(0, 12));
+      const { ciphertext, nonce } = await encryptVaultPayload(payload, api.getVaultSecret(vaultId));
 
       const created = await api.createVaultItem(vaultId, {
         kind: 'identity',

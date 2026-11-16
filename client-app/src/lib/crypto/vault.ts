@@ -1,4 +1,8 @@
-// OpenTermius Client-Side WebCrypto E2EE Adapter
+// OpenTermius Client-Side WebCrypto E2EE Adapter (AES-256-GCM + PBKDF2)
+
+const KEY_CACHE = new Map<string, CryptoKey>();
+const FALLBACK_SECRET_KEY = 'opentermius-e2ee-default-vault-secret';
+const APP_SALT = new TextEncoder().encode('OpenTermius-E2EE-Salt-v1');
 
 export async function deriveKeyFromPassword(password: string, salt: Uint8Array): Promise<CryptoKey> {
   const enc = new TextEncoder();
@@ -13,7 +17,7 @@ export async function deriveKeyFromPassword(password: string, salt: Uint8Array):
   return window.crypto.subtle.deriveKey(
     {
       name: 'PBKDF2',
-      salt,
+      salt: salt as BufferSource,
       iterations: 100000,
       hash: 'SHA-256'
     },
@@ -22,6 +26,16 @@ export async function deriveKeyFromPassword(password: string, salt: Uint8Array):
     true,
     ['encrypt', 'decrypt']
   );
+}
+
+async function getCachedVaultKey(vaultSecret?: string): Promise<CryptoKey | null> {
+  if (typeof window === 'undefined' || !window.crypto?.subtle) return null;
+  const secret = vaultSecret?.trim() || FALLBACK_SECRET_KEY;
+  const cached = KEY_CACHE.get(secret);
+  if (cached) return cached;
+  const key = await deriveKeyFromPassword(secret, APP_SALT);
+  KEY_CACHE.set(secret, key);
+  return key;
 }
 
 export async function encryptVaultItem(
@@ -60,14 +74,61 @@ export async function decryptVaultItem<T>(
   const decryptedBuffer = await window.crypto.subtle.decrypt(
     {
       name: 'AES-GCM',
-      iv
+      iv: iv as BufferSource
     },
     vaultKey,
-    encryptedBytes
+    encryptedBytes as BufferSource
   );
 
   const dec = new TextDecoder();
   return JSON.parse(dec.decode(decryptedBuffer)) as T;
+}
+
+export async function encryptVaultPayload(
+  payload: unknown,
+  vaultSecret?: string
+): Promise<{ ciphertext: string; nonce: string }> {
+  const key = await getCachedVaultKey(vaultSecret);
+  if (key) {
+    return encryptVaultItem(payload, key);
+  }
+  // Fallback only if WebCrypto subtle is unavailable (non-secure HTTP LAN dev)
+  return {
+    ciphertext: btoa(JSON.stringify(payload)),
+    nonce: btoa(crypto.randomUUID().slice(0, 12))
+  };
+}
+
+export async function decryptVaultPayload<T>(
+  ciphertextBase64: string,
+  nonceBase64: string,
+  vaultSecret?: string
+): Promise<T | null> {
+  if (!ciphertextBase64) return null;
+
+  const key = await getCachedVaultKey(vaultSecret);
+  if (key && nonceBase64) {
+    try {
+      return await decryptVaultItem<T>(ciphertextBase64, nonceBase64, key);
+    } catch {
+      // Fallback to default secret or legacy Base64 JSON below
+    }
+    if (vaultSecret && vaultSecret !== FALLBACK_SECRET_KEY) {
+      try {
+        const defaultKey = await getCachedVaultKey(FALLBACK_SECRET_KEY);
+        if (defaultKey) return await decryptVaultItem<T>(ciphertextBase64, nonceBase64, defaultKey);
+      } catch {
+        // Fallback to legacy Base64 JSON below
+      }
+    }
+  }
+
+  // Backward compatibility for legacy unencrypted Base64 items
+  try {
+    return JSON.parse(atob(ciphertextBase64)) as T;
+  } catch {
+    return null;
+  }
 }
 
 function bufferToBase64(buffer: Uint8Array): string {

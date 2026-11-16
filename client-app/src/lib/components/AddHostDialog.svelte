@@ -1,6 +1,7 @@
 <script lang="ts">
-  import { X, Server, Key, Lock, Radio, Shield, Zap, UserCheck, Network, Globe } from 'lucide-svelte';
+  import { X, Server, ChevronDown, ChevronRight, Radio, Network } from 'lucide-svelte';
   import { api } from '../api/client';
+  import { decryptVaultPayload } from '../crypto/vault';
 
   interface Props {
     isOpen: boolean;
@@ -22,8 +23,9 @@
   let privateKey = $state('');
   let passphrase = $state('');
   let useMosh = $state(false);
-  let group = $state('Production');
-  let tags = $state('aws, web');
+  let group = $state('Default');
+  let tags = $state('');
+  let showAdvanced = $state(false);
 
   let vaultIdentities = $state<any[]>([]);
   let vaultKeys = $state<any[]>([]);
@@ -48,34 +50,33 @@
 
       vaultHosts = rawHosts.filter((h) => !initialHost || h.id !== initialHost.id);
 
-      vaultIdentities = identities.map((item) => {
-        let parsed: any = {};
-        try {
-          parsed = JSON.parse(atob(item.ciphertext));
-        } catch {}
-        return {
-          id: item.id,
-          label: item.label,
-          username: parsed.username || 'root',
-          authType: parsed.authType || 'password',
-          password: parsed.password || '',
-          privateKey: parsed.privateKey || '',
-          passphrase: parsed.passphrase || ''
-        };
-      });
+      const secret = api.getVaultSecret(activeVaultId);
+      vaultIdentities = await Promise.all(
+        identities.map(async (item) => {
+          const parsed = await decryptVaultPayload<any>(item.ciphertext, item.nonce, secret);
+          return {
+            id: item.id,
+            label: item.label,
+            username: parsed?.username || 'root',
+            authType: parsed?.authType || 'password',
+            password: parsed?.password || '',
+            privateKey: parsed?.privateKey || '',
+            passphrase: parsed?.passphrase || ''
+          };
+        })
+      );
 
-      vaultKeys = keys.map((item) => {
-        let parsed: any = {};
-        try {
-          parsed = JSON.parse(atob(item.ciphertext));
-        } catch {}
-        return {
-          id: item.id,
-          label: item.label,
-          privateKey: parsed.privateKey || '',
-          passphrase: parsed.passphrase || ''
-        };
-      });
+      vaultKeys = await Promise.all(
+        keys.map(async (item) => {
+          const parsed = await decryptVaultPayload<any>(item.ciphertext, item.nonce, secret);
+          return {
+            id: item.id,
+            label: item.label,
+            privateKey: parsed?.privateKey || '',
+            passphrase: parsed?.passphrase || ''
+          };
+        })
+      );
     } catch {
       // ignore
     }
@@ -87,9 +88,9 @@
     if (found) {
       username = found.username;
       authType = found.authType;
-      password = found.password;
-      privateKey = found.privateKey;
-      passphrase = found.passphrase;
+      password = found.authType === 'password' ? found.password : '';
+      privateKey = found.authType === 'key' ? found.privateKey : '';
+      passphrase = found.authType === 'key' ? found.passphrase : '';
     }
   }
 
@@ -132,6 +133,12 @@
           proxyHost = '127.0.0.1';
           proxyPort = 1080;
         }
+        showAdvanced = Boolean(
+          initialHost.proxy ||
+            initialHost.useMosh ||
+            (initialHost.group && initialHost.group !== 'Default') ||
+            (Array.isArray(initialHost.tags) && initialHost.tags.length > 0)
+        );
       } else {
         label = '';
         address = '';
@@ -142,29 +149,31 @@
         privateKey = '';
         passphrase = '';
         useMosh = false;
-        group = 'Production';
-        tags = 'aws, web';
+        group = 'Default';
+        tags = '';
         credMode = 'manual';
         proxyMode = 'none';
         proxyJumpHostId = '';
         proxyHost = '127.0.0.1';
         proxyPort = 1080;
+        showAdvanced = false;
       }
     }
   });
 
   function handleSubmit(e: SubmitEvent) {
     e.preventDefault();
+    const cleanAddr = address.trim() || '127.0.0.1';
     onSave({
       id: initialHost?.id || crypto.randomUUID(),
-      label: label || 'SSH Host',
-      address: address || '127.0.0.1',
-      port,
+      label: label.trim() || cleanAddr,
+      address: cleanAddr,
+      port: port || 22,
       username: username || 'root',
       authType,
-      password,
-      privateKey,
-      passphrase,
+      password: authType === 'password' ? password : '',
+      privateKey: authType === 'key' ? privateKey : '',
+      passphrase: authType === 'key' ? passphrase : '',
       useMosh,
       group: group || 'Default',
       tags: tags
@@ -187,105 +196,94 @@
 </script>
 
 {#if isOpen}
-  <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4 overflow-y-auto">
-    <div class="w-full max-w-lg max-h-[85dvh] overflow-y-auto rounded-2xl border border-[#262635] bg-[#14141d] p-4 sm:p-6 shadow-2xl space-y-5 animate-in fade-in zoom-in-95 duration-150 my-auto">
-      <div class="flex items-start justify-between">
+  <div class="fixed inset-0 z-50 flex items-stretch sm:items-center justify-center bg-[#0e0e14] sm:bg-black/75 sm:backdrop-blur-sm p-0 sm:p-4 overflow-y-auto">
+    <div class="w-full h-full sm:h-auto sm:max-w-lg sm:max-h-[85dvh] flex flex-col overflow-y-auto rounded-none sm:rounded-2xl sm:border sm:border-[#262635] bg-[#14141d] p-5 pb-[calc(1.25rem+var(--sab))] sm:p-6 shadow-2xl space-y-5 animate-in fade-in duration-150 sm:my-auto">
+      <div class="flex items-center justify-between">
         <div class="flex items-center gap-3">
           <div class="flex h-10 w-10 items-center justify-center rounded-xl bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
             <Server class="h-5 w-5" />
           </div>
-          <div>
-            <h3 class="text-base font-bold text-white">
-              {initialHost ? 'Edit SSH Host' : 'Add New SSH Host'}
-            </h3>
-            <p class="text-xs text-neutral-400">
-              {initialHost ? 'Update connection details and credentials.' : 'Configure connection details, identities, and keys.'}
-            </p>
-          </div>
+          <h3 class="text-lg sm:text-base font-bold text-white">
+            {initialHost?.id ? 'Edit Host' : 'New Host'}
+          </h3>
         </div>
-        <button onclick={onClose} class="text-neutral-400 hover:text-white p-1 rounded-lg hover:bg-[#20202c]">
-          <X class="h-4 w-4" />
+        <button type="button" onclick={onClose} class="text-neutral-400 hover:text-white p-2 rounded-xl hover:bg-[#20202c]">
+          <X class="h-5 w-5 sm:h-4 sm:w-4" />
         </button>
       </div>
 
-      <form onsubmit={handleSubmit} class="space-y-4 text-xs">
+      <form onsubmit={handleSubmit} class="flex-1 flex flex-col justify-between space-y-4 text-sm sm:text-xs">
+        <div class="space-y-4">
         <div>
-          <label for="host-label" class="block text-neutral-300 font-medium mb-1">Host Label</label>
+          <label for="host-label" class="block text-neutral-300 font-medium mb-1.5">Label <span class="text-neutral-500 font-normal">(optional)</span></label>
           <input
             id="host-label"
             type="text"
             bind:value={label}
-            placeholder="e.g. AWS Production Web 01"
-            class="w-full rounded-lg border border-[#252535] bg-[#0e0e14] px-3 py-2 text-white placeholder-neutral-500 outline-none focus:border-emerald-500"
-            required
+            placeholder="e.g. Prod Server (defaults to IP)"
+            class="w-full rounded-xl border border-[#252535] bg-[#0e0e14] px-3.5 py-3 sm:py-2.5 text-base sm:text-xs text-white placeholder-neutral-500 outline-none focus:border-emerald-500"
           />
         </div>
 
-        <div class="grid grid-cols-3 gap-3">
-          <div class="col-span-2">
-            <label for="host-addr" class="block text-neutral-300 font-medium mb-1">Hostname or IP Address</label>
+        <div class="grid grid-cols-4 gap-2.5">
+          <div class="col-span-3">
+            <label for="host-addr" class="block text-neutral-300 font-medium mb-1.5">Host / IP</label>
             <input
               id="host-addr"
               type="text"
               bind:value={address}
-              placeholder="e.g. 54.210.88.14 or 192.168.1.10"
-              class="w-full rounded-lg border border-[#252535] bg-[#0e0e14] px-3 py-2 font-mono text-white placeholder-neutral-500 outline-none focus:border-emerald-500"
+              placeholder="192.168.1.10 or server.com"
+              class="w-full rounded-xl border border-[#252535] bg-[#0e0e14] px-3.5 py-3 sm:py-2.5 font-mono text-base sm:text-xs text-white placeholder-neutral-500 outline-none focus:border-emerald-500"
               required
             />
           </div>
           <div>
-            <label for="host-port" class="block text-neutral-300 font-medium mb-1">Port</label>
+            <label for="host-port" class="block text-neutral-300 font-medium mb-1.5">Port</label>
             <input
               id="host-port"
               type="number"
               bind:value={port}
-              class="w-full rounded-lg border border-[#252535] bg-[#0e0e14] px-3 py-2 font-mono text-white outline-none focus:border-emerald-500"
+              class="w-full rounded-xl border border-[#252535] bg-[#0e0e14] px-3 py-3 sm:py-2.5 font-mono text-base sm:text-xs text-white outline-none focus:border-emerald-500"
               required
             />
           </div>
         </div>
 
-        <div class="grid grid-cols-2 gap-3">
-          <div>
-            <label for="host-user" class="block text-neutral-300 font-medium mb-1">Username</label>
-            <input
-              id="host-user"
-              type="text"
-              bind:value={username}
-              placeholder="ubuntu / root / ec2-user"
-              class="w-full rounded-lg border border-[#252535] bg-[#0e0e14] px-3 py-2 font-mono text-white placeholder-neutral-500 outline-none focus:border-emerald-500"
-              required
-            />
-          </div>
-          <div>
-            <label for="host-group" class="block text-neutral-300 font-medium mb-1">Group / Folder</label>
-            <input
-              id="host-group"
-              type="text"
-              bind:value={group}
-              placeholder="Production / Staging"
-              class="w-full rounded-lg border border-[#252535] bg-[#0e0e14] px-3 py-2 text-white placeholder-neutral-500 outline-none focus:border-emerald-500"
-            />
-          </div>
+        <div>
+          <label for="host-user" class="block text-neutral-300 font-medium mb-1.5">Username</label>
+          <input
+            id="host-user"
+            type="text"
+            bind:value={username}
+            placeholder="root / ubuntu"
+            class="w-full rounded-xl border border-[#252535] bg-[#0e0e14] px-3.5 py-3 sm:py-2.5 font-mono text-base sm:text-xs text-white placeholder-neutral-500 outline-none focus:border-emerald-500"
+            required
+          />
         </div>
 
-        <!-- Credential Source Selector -->
-        <div class="rounded-xl border border-[#252535] bg-[#0f0f18] p-3 space-y-3">
-          <div class="flex items-center justify-between">
-            <span class="text-xs font-semibold text-neutral-200">Credential Source</span>
+        <!-- Compact Auth Section -->
+        <div class="rounded-xl border border-[#252535] bg-[#0f0f18] p-3 space-y-2.5">
+          <div class="flex items-center justify-between gap-2">
             <div class="flex items-center gap-1 bg-[#1a1a24] p-0.5 rounded-lg border border-[#2a2a3a]">
               <button
                 type="button"
-                onclick={() => (credMode = 'manual')}
-                class="px-2 py-0.5 rounded-md text-[10px] font-medium transition {credMode === 'manual' ? 'bg-emerald-600 text-white' : 'text-neutral-400 hover:text-white'}"
+                onclick={() => { credMode = 'manual'; authType = 'password'; }}
+                class="px-2.5 py-1 rounded-md text-[11px] font-medium transition {credMode === 'manual' && authType === 'password' ? 'bg-emerald-600 text-white' : 'text-neutral-400 hover:text-white'}"
               >
-                Custom
+                Password
+              </button>
+              <button
+                type="button"
+                onclick={() => { credMode = 'manual'; authType = 'key'; }}
+                class="px-2.5 py-1 rounded-md text-[11px] font-medium transition {credMode === 'manual' && authType === 'key' ? 'bg-emerald-600 text-white' : 'text-neutral-400 hover:text-white'}"
+              >
+                SSH Key
               </button>
               {#if vaultIdentities.length > 0}
                 <button
                   type="button"
                   onclick={() => (credMode = 'identity')}
-                  class="px-2 py-0.5 rounded-md text-[10px] font-medium transition {credMode === 'identity' ? 'bg-indigo-600 text-white' : 'text-neutral-400 hover:text-white'}"
+                  class="px-2.5 py-1 rounded-md text-[11px] font-medium transition {credMode === 'identity' ? 'bg-indigo-600 text-white' : 'text-neutral-400 hover:text-white'}"
                 >
                   Identity
                 </button>
@@ -294,7 +292,7 @@
                 <button
                   type="button"
                   onclick={() => (credMode = 'keychain')}
-                  class="px-2 py-0.5 rounded-md text-[10px] font-medium transition {credMode === 'keychain' ? 'bg-emerald-600 text-white' : 'text-neutral-400 hover:text-white'}"
+                  class="px-2.5 py-1 rounded-md text-[11px] font-medium transition {credMode === 'keychain' ? 'bg-emerald-600 text-white' : 'text-neutral-400 hover:text-white'}"
                 >
                   Keychain
                 </button>
@@ -303,202 +301,181 @@
           </div>
 
           {#if credMode === 'identity'}
-            <div>
-              <label for="id-select" class="block text-neutral-400 text-[11px] mb-1">Select Identity Profile</label>
-              <select
-                id="id-select"
-                bind:value={selectedIdentityId}
-                onchange={(e) => handleSelectIdentity(e.currentTarget.value)}
-                class="w-full rounded-lg border border-[#28283c] bg-[#0a0a10] px-3 py-2 text-white outline-none focus:border-indigo-500"
-              >
-                <option value="" disabled>-- Choose an Identity --</option>
-                {#each vaultIdentities as id}
-                  <option value={id.id}>{id.label} ({id.username})</option>
-                {/each}
-              </select>
-            </div>
+            <select
+              id="id-select"
+              bind:value={selectedIdentityId}
+              onchange={(e) => handleSelectIdentity(e.currentTarget.value)}
+              class="w-full rounded-xl border border-[#28283c] bg-[#0a0a10] px-3 py-2.5 text-sm sm:text-xs text-white outline-none focus:border-indigo-500"
+            >
+              <option value="" disabled>-- Choose Identity --</option>
+              {#each vaultIdentities as id}
+                <option value={id.id}>{id.label} ({id.username})</option>
+              {/each}
+            </select>
           {:else if credMode === 'keychain'}
-            <div>
-              <label for="keychain-select" class="block text-neutral-400 text-[11px] mb-1">Select SSH Key from Keychain</label>
-              <select
-                id="keychain-select"
-                bind:value={selectedKeyId}
-                onchange={(e) => handleSelectKey(e.currentTarget.value)}
-                class="w-full rounded-lg border border-[#28283c] bg-[#0a0a10] px-3 py-2 text-white outline-none focus:border-emerald-500"
-              >
-                <option value="" disabled>-- Choose a Key --</option>
-                {#each vaultKeys as k}
-                  <option value={k.id}>{k.label}</option>
-                {/each}
-              </select>
-            </div>
+            <select
+              id="keychain-select"
+              bind:value={selectedKeyId}
+              onchange={(e) => handleSelectKey(e.currentTarget.value)}
+              class="w-full rounded-xl border border-[#28283c] bg-[#0a0a10] px-3 py-2.5 text-sm sm:text-xs text-white outline-none focus:border-emerald-500"
+            >
+              <option value="" disabled>-- Choose Key --</option>
+              {#each vaultKeys as k}
+                <option value={k.id}>{k.label}</option>
+              {/each}
+            </select>
+          {:else if authType === 'password'}
+            <input
+              id="host-pass"
+              type="password"
+              bind:value={password}
+              placeholder="SSH password (optional)"
+              class="w-full rounded-xl border border-[#28283c] bg-[#0a0a10] px-3 py-2.5 text-sm sm:text-xs text-white placeholder-neutral-500 outline-none focus:border-emerald-500"
+            />
           {:else}
-            <!-- Manual Credential Inputs -->
-            <div class="space-y-3">
+            <div class="space-y-2">
+              <textarea
+                id="host-privkey"
+                rows={3}
+                bind:value={privateKey}
+                placeholder="-----BEGIN OPENSSH PRIVATE KEY-----"
+                class="w-full rounded-xl border border-[#28283c] bg-[#0a0a10] px-3 py-2 font-mono text-[11px] text-white placeholder-neutral-600 outline-none focus:border-emerald-500"
+              ></textarea>
+              <input
+                id="host-passphrase"
+                type="password"
+                bind:value={passphrase}
+                placeholder="Passphrase (optional)"
+                class="w-full rounded-xl border border-[#28283c] bg-[#0a0a10] px-3 py-2 text-sm sm:text-xs text-white placeholder-neutral-500 outline-none focus:border-emerald-500"
+              />
+            </div>
+          {/if}
+        </div>
+
+        <!-- Collapsible Advanced Options -->
+        <button
+          type="button"
+          onclick={() => (showAdvanced = !showAdvanced)}
+          class="flex w-full items-center justify-between rounded-xl border border-[#22222e] bg-[#0e0e16] px-3 py-2.5 text-xs font-medium text-neutral-300 hover:text-white transition"
+        >
+          <span>More Options (Folder, Tags, Proxy, Mosh)</span>
+          {#if showAdvanced}
+            <ChevronDown class="h-4 w-4 text-emerald-400" />
+          {:else}
+            <ChevronRight class="h-4 w-4 text-neutral-500" />
+          {/if}
+        </button>
+
+        {#if showAdvanced}
+          <div class="space-y-3 pt-1 animate-in fade-in duration-100">
+            <div class="grid grid-cols-2 gap-2.5">
+              <div>
+                <label for="host-group" class="block text-neutral-400 text-[11px] mb-1">Folder</label>
+                <input
+                  id="host-group"
+                  type="text"
+                  bind:value={group}
+                  placeholder="Default"
+                  class="w-full rounded-xl border border-[#252535] bg-[#0e0e14] px-3 py-2 text-white placeholder-neutral-500 outline-none focus:border-emerald-500"
+                />
+              </div>
+              <div>
+                <label for="host-tags" class="block text-neutral-400 text-[11px] mb-1">Tags</label>
+                <input
+                  id="host-tags"
+                  type="text"
+                  bind:value={tags}
+                  placeholder="prod, web"
+                  class="w-full rounded-xl border border-[#252535] bg-[#0e0e14] px-3 py-2 text-white placeholder-neutral-500 outline-none focus:border-emerald-500"
+                />
+              </div>
+            </div>
+
+            <!-- Proxy & Jump Host Section -->
+            <div class="rounded-xl border border-[#22222e] bg-[#0e0e16] p-3 space-y-3">
               <div class="flex items-center justify-between">
-                <span class="text-neutral-400 text-[11px]">Authentication Method</span>
-                <div class="flex items-center gap-1 bg-[#1a1a24] p-0.5 rounded-lg border border-[#2a2a3a]">
-                  <button
-                    type="button"
-                    onclick={() => (authType = 'password')}
-                    class="px-2.5 py-1 rounded-md text-[11px] font-medium transition {authType === 'password' ? 'bg-emerald-600 text-white' : 'text-neutral-400 hover:text-white'}"
-                  >
-                    Password
-                  </button>
-                  <button
-                    type="button"
-                    onclick={() => (authType = 'key')}
-                    class="px-2.5 py-1 rounded-md text-[11px] font-medium transition {authType === 'key' ? 'bg-emerald-600 text-white' : 'text-neutral-400 hover:text-white'}"
-                  >
-                    SSH Key
-                  </button>
+                <div class="flex items-center gap-2">
+                  <Network class="h-4 w-4 text-emerald-400" />
+                  <span class="font-medium text-white text-xs">Proxy / Jump Host</span>
                 </div>
+                <select
+                  bind:value={proxyMode}
+                  class="rounded-lg border border-[#282838] bg-[#14141d] px-2 py-1 text-[11px] text-neutral-200 outline-none focus:border-emerald-500"
+                >
+                  <option value="none">Direct</option>
+                  <option value="jump_host">Jump Host</option>
+                  <option value="socks5">SOCKS5</option>
+                  <option value="http">HTTP Proxy</option>
+                </select>
               </div>
 
-              {#if authType === 'password'}
-                <div>
-                  <label for="host-pass" class="block text-neutral-400 text-[11px] mb-1">SSH Password</label>
+              {#if proxyMode === 'jump_host'}
+                <div class="pt-2 border-t border-[#1e1e28] text-xs">
+                  {#if vaultHosts.length === 0}
+                    <p class="text-[11px] text-amber-400/90">No other hosts in vault to act as bastion.</p>
+                  {:else}
+                    <select
+                      id="proxy-bastion-select"
+                      bind:value={proxyJumpHostId}
+                      class="w-full rounded-lg border border-[#282838] bg-[#0a0a10] px-3 py-2 text-xs text-white outline-none focus:border-emerald-500"
+                    >
+                      <option value="">-- Choose Jump Host --</option>
+                      {#each vaultHosts as vh}
+                        <option value={vh.id}>{vh.label}</option>
+                      {/each}
+                    </select>
+                  {/if}
+                </div>
+              {:else if proxyMode === 'socks5' || proxyMode === 'http'}
+                <div class="pt-2 border-t border-[#1e1e28] grid grid-cols-3 gap-2 text-xs">
                   <input
-                    id="host-pass"
-                    type="password"
-                    bind:value={password}
-                    placeholder="Enter SSH password"
-                    class="w-full rounded-lg border border-[#28283c] bg-[#0a0a10] px-3 py-2 text-white placeholder-neutral-600 outline-none focus:border-emerald-500"
+                    id="proxy-target-host"
+                    type="text"
+                    bind:value={proxyHost}
+                    placeholder="127.0.0.1"
+                    class="col-span-2 w-full rounded-lg border border-[#282838] bg-[#0a0a10] px-2.5 py-2 text-xs text-white outline-none focus:border-emerald-500"
+                  />
+                  <input
+                    id="proxy-target-port"
+                    type="number"
+                    bind:value={proxyPort}
+                    placeholder="1080"
+                    class="w-full rounded-lg border border-[#282838] bg-[#0a0a10] px-2.5 py-2 text-xs text-white outline-none focus:border-emerald-500 font-mono"
                   />
                 </div>
-              {:else}
-                <div class="space-y-2">
-                  <div>
-                    <label for="host-privkey" class="block text-neutral-400 text-[11px] mb-1">Private Key (OpenSSH PEM)</label>
-                    <textarea
-                      id="host-privkey"
-                      rows={4}
-                      bind:value={privateKey}
-                      placeholder="-----BEGIN OPENSSH PRIVATE KEY-----&#10;..."
-                      class="w-full rounded-lg border border-[#28283c] bg-[#0a0a10] px-3 py-2 font-mono text-[11px] text-white placeholder-neutral-600 outline-none focus:border-emerald-500"
-                    ></textarea>
-                  </div>
-                  <div>
-                    <label for="host-passphrase" class="block text-neutral-400 text-[11px] mb-1">Key Passphrase (Optional)</label>
-                    <input
-                      id="host-passphrase"
-                      type="password"
-                      bind:value={passphrase}
-                      placeholder="Passphrase if key is encrypted"
-                      class="w-full rounded-lg border border-[#28283c] bg-[#0a0a10] px-3 py-2 text-white placeholder-neutral-600 outline-none focus:border-emerald-500"
-                    />
-                  </div>
-                </div>
               {/if}
             </div>
-          {/if}
-        </div>
 
-        <div>
-          <label for="host-tags" class="block text-neutral-300 font-medium mb-1">Tags (comma separated)</label>
-          <input
-            id="host-tags"
-            type="text"
-            bind:value={tags}
-            placeholder="aws, web, nginx"
-            class="w-full rounded-lg border border-[#252535] bg-[#0e0e14] px-3 py-2 text-white placeholder-neutral-500 outline-none focus:border-emerald-500"
-          />
-        </div>
-
-        <!-- Proxy & Jump Host Section -->
-        <div class="rounded-xl border border-[#22222e] bg-[#0e0e16] p-3 space-y-3">
-          <div class="flex items-center justify-between">
-            <div class="flex items-center gap-2">
-              <Network class="h-4 w-4 text-emerald-400" />
-              <div>
-                <p class="font-medium text-white text-xs">Proxy & Jump Host</p>
-                <p class="text-[10px] text-neutral-400">Route SSH traffic via Bastion host or Proxy</p>
+            <!-- Mosh option -->
+            <div class="rounded-xl border border-[#22222e] bg-[#0e0e16] p-3 flex items-center justify-between">
+              <div class="flex items-center gap-2">
+                <Radio class="h-4 w-4 text-indigo-400" />
+                <span class="font-medium text-white">Enable Mosh Protocol</span>
               </div>
-            </div>
-            <select
-              bind:value={proxyMode}
-              class="rounded-lg border border-[#282838] bg-[#14141d] px-2 py-1 text-[11px] text-neutral-200 outline-none focus:border-emerald-500"
-            >
-              <option value="none">Direct (No Proxy)</option>
-              <option value="jump_host">Jump Host (Bastion)</option>
-              <option value="socks5">SOCKS5 Proxy</option>
-              <option value="http">HTTP / HTTPS Proxy</option>
-            </select>
-          </div>
-
-          {#if proxyMode === 'jump_host'}
-            <div class="pt-2 border-t border-[#1e1e28] text-xs">
-              <label for="proxy-bastion-select" class="block text-neutral-400 text-[11px] mb-1">Select Bastion Host</label>
-              {#if vaultHosts.length === 0}
-                <p class="text-[11px] text-amber-400/90">No other hosts in vault to act as bastion.</p>
-              {:else}
-                <select
-                  id="proxy-bastion-select"
-                  bind:value={proxyJumpHostId}
-                  class="w-full rounded-lg border border-[#282838] bg-[#0a0a10] px-3 py-1.5 text-xs text-white outline-none focus:border-emerald-500"
-                >
-                  <option value="">-- Choose Jump Host --</option>
-                  {#each vaultHosts as vh}
-                    <option value={vh.id}>{vh.label}</option>
-                  {/each}
-                </select>
-              {/if}
-            </div>
-          {:else if proxyMode === 'socks5' || proxyMode === 'http'}
-            <div class="pt-2 border-t border-[#1e1e28] grid grid-cols-3 gap-2 text-xs">
-              <div class="col-span-2">
-                <label for="proxy-target-host" class="block text-neutral-400 text-[11px] mb-1">Proxy Host / IP</label>
-                <input
-                  id="proxy-target-host"
-                  type="text"
-                  bind:value={proxyHost}
-                  placeholder="127.0.0.1 or proxy.corp"
-                  class="w-full rounded-lg border border-[#282838] bg-[#0a0a10] px-2.5 py-1.5 text-xs text-white outline-none focus:border-emerald-500"
-                />
-              </div>
-              <div>
-                <label for="proxy-target-port" class="block text-neutral-400 text-[11px] mb-1">Port</label>
-                <input
-                  id="proxy-target-port"
-                  type="number"
-                  bind:value={proxyPort}
-                  placeholder="1080"
-                  class="w-full rounded-lg border border-[#282838] bg-[#0a0a10] px-2.5 py-1.5 text-xs text-white outline-none focus:border-emerald-500 font-mono"
-                />
-              </div>
-            </div>
-          {/if}
-        </div>
-
-        <!-- Mosh option -->
-        <div class="rounded-xl border border-[#22222e] bg-[#0e0e16] p-3 flex items-center justify-between">
-          <div class="flex items-center gap-2">
-            <Radio class="h-4 w-4 text-indigo-400" />
-            <div>
-              <p class="font-medium text-white">Enable Mosh Protocol</p>
-              <p class="text-[10px] text-neutral-400">Resilient UDP roaming for unstable networks</p>
+              <input
+                type="checkbox"
+                bind:checked={useMosh}
+                class="h-4 w-4 accent-emerald-500 rounded cursor-pointer"
+              />
             </div>
           </div>
-          <input
-            type="checkbox"
-            bind:checked={useMosh}
-            class="h-4 w-4 accent-emerald-500 rounded cursor-pointer"
-          />
+        {/if}
+
         </div>
 
-        <div class="flex justify-end gap-2 pt-3 border-t border-[#20202c]">
+        <div class="grid grid-cols-2 sm:flex sm:justify-end gap-2.5 pt-3 border-t border-[#20202c]">
           <button
             type="button"
             onclick={onClose}
-            class="rounded-lg bg-[#20202c] px-4 py-2 font-semibold text-neutral-300 hover:bg-[#282838] transition"
+            class="rounded-xl sm:rounded-lg bg-[#20202c] px-4 py-3 sm:py-2 text-sm sm:text-xs font-semibold text-neutral-300 hover:bg-[#282838] transition"
           >
             Cancel
           </button>
           <button
             type="submit"
-            class="rounded-lg bg-emerald-600 px-5 py-2 font-semibold text-white shadow hover:bg-emerald-500 transition active:scale-95"
+            class="rounded-xl sm:rounded-lg bg-emerald-600 px-5 py-3 sm:py-2 text-sm sm:text-xs font-semibold text-white shadow hover:bg-emerald-500 transition active:scale-95"
           >
-            {initialHost ? 'Update Host' : 'Save Host'}
+            {initialHost?.id ? 'Update Host' : 'Save Host'}
           </button>
         </div>
       </form>

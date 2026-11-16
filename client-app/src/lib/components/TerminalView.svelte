@@ -4,7 +4,7 @@
   import { FitAddon } from '@xterm/addon-fit';
   import type { TerminalHostConfig } from '../stores/terminal.svelte';
   import { platform } from '../stores/platform.svelte';
-  import { formatErrorMessage } from '../stores/toast.svelte';
+  import { toast, formatErrorMessage } from '../stores/toast.svelte';
   import {
     Share2,
     RefreshCw,
@@ -13,7 +13,9 @@
     Columns2,
     Rows2,
     X,
-    Keyboard
+    Keyboard,
+    Copy,
+    ClipboardPaste
   } from 'lucide-svelte';
 
   interface Props {
@@ -61,8 +63,218 @@
   );
   let ctrlActive = $state(false);
   let altActive = $state(false);
+  let fontSize = $state<number>(
+    typeof window !== 'undefined'
+      ? Number(localStorage.getItem('opentermius_term_fontsize')) || (platform.isMobile ? 12 : 14)
+      : 13
+  );
   let btnTouch = $derived(platform.isHandheld ? 'h-9 w-9 justify-center' : 'px-2 py-1');
+  let hasSelection = $state(false);
+  let showTouchMenu = $state(false);
+  let selectionMode = $state(false);
+  let selStartCol = $state(0);
+  let selStartRow = $state(0);
+  let selEndCol = $state(0);
+  let selEndRow = $state(0);
+  let startHandlePos = $state<{ x: number; y: number } | null>(null);
+  let endHandlePos = $state<{ x: number; y: number } | null>(null);
+  let activeHandle = $state<'start' | 'end' | 'new' | null>(null);
+  let repeatDelayTimer: ReturnType<typeof setTimeout> | null = null;
+  let repeatIntervalTimer: ReturnType<typeof setInterval> | null = null;
   let sessionStartMs = 0;
+
+  function stopKeyRepeat() {
+    if (repeatDelayTimer) {
+      clearTimeout(repeatDelayTimer);
+      repeatDelayTimer = null;
+    }
+    if (repeatIntervalTimer) {
+      clearInterval(repeatIntervalTimer);
+      repeatIntervalTimer = null;
+    }
+  }
+
+  function startKeyRepeat(key: string, e: PointerEvent) {
+    e.preventDefault();
+    stopKeyRepeat();
+    handleVirtualKey(key);
+    repeatDelayTimer = setTimeout(() => {
+      repeatIntervalTimer = setInterval(() => handleVirtualKey(key), 55);
+    }, 300);
+  }
+
+  function pointToTerminalCell(clientX: number, clientY: number) {
+    const screenEl = terminalContainer?.querySelector('.xterm-screen') as HTMLElement | null;
+    const rect = (screenEl ?? terminalContainer!).getBoundingClientRect();
+    const cols = Math.max(1, term?.cols || 80);
+    const rows = Math.max(1, term?.rows || 24);
+    const col = Math.max(0, Math.min(cols - 1, Math.floor(((clientX - rect.left) / rect.width) * cols)));
+    const viewRow = Math.max(0, Math.min(rows - 1, Math.floor(((clientY - rect.top) / rect.height) * rows)));
+    const bufRow = (term?.buffer.active.viewportY ?? 0) + viewRow;
+    return { col, bufRow, cols };
+  }
+
+  function updateHandleCoords() {
+    if (!term || !terminalContainer || !selectionMode || !hasSelection) {
+      startHandlePos = null;
+      endHandlePos = null;
+      return;
+    }
+    const wrapper = terminalContainer.parentElement;
+    const screenEl = terminalContainer.querySelector('.xterm-screen') as HTMLElement | null;
+    if (!wrapper || !screenEl) return;
+    const wRect = wrapper.getBoundingClientRect();
+    const sRect = screenEl.getBoundingClientRect();
+    const cols = Math.max(1, term.cols || 80);
+    const rows = Math.max(1, term.rows || 24);
+    const cellW = sRect.width / cols;
+    const cellH = sRect.height / rows;
+    const vpY = term.buffer.active.viewportY ?? 0;
+    const offX = sRect.left - wRect.left;
+    const offY = sRect.top - wRect.top;
+
+    startHandlePos = {
+      x: Math.max(8, Math.min(wRect.width - 8, offX + selStartCol * cellW)),
+      y: Math.max(12, Math.min(wRect.height - 8, offY + (selStartRow - vpY + 1) * cellH))
+    };
+    endHandlePos = {
+      x: Math.max(8, Math.min(wRect.width - 8, offX + (selEndCol + 1) * cellW)),
+      y: Math.max(12, Math.min(wRect.height - 8, offY + (selEndRow - vpY + 1) * cellH))
+    };
+  }
+
+  function selectWordAt(col: number, bufRow: number) {
+    if (!term) return;
+    const lineStr = term.buffer.active.getLine(bufRow)?.translateToString(false) ?? '';
+    const isWord = (ch: string) => /[A-Za-z0-9_.\-/:@~]/.test(ch);
+    let c1 = col;
+    let c2 = col;
+    if (col < lineStr.length && isWord(lineStr[col])) {
+      while (c1 > 0 && isWord(lineStr[c1 - 1])) c1--;
+      while (c2 + 1 < lineStr.length && isWord(lineStr[c2 + 1])) c2++;
+    }
+    selStartCol = c1;
+    selStartRow = bufRow;
+    selEndCol = c2;
+    selEndRow = bufRow;
+    term.select(c1, bufRow, c2 - c1 + 1);
+    hasSelection = true;
+    updateHandleCoords();
+  }
+
+  function applyOrderedSelection(c1: number, r1: number, c2: number, r2: number, cols: number) {
+    const idx1 = r1 * cols + c1;
+    const idx2 = r2 * cols + c2;
+    const minIdx = Math.min(idx1, idx2);
+    const maxIdx = Math.max(idx1, idx2);
+    const sRow = Math.floor(minIdx / cols);
+    const sCol = minIdx % cols;
+    const eRow = Math.floor(maxIdx / cols);
+    const eCol = maxIdx % cols;
+    selStartCol = sCol;
+    selStartRow = sRow;
+    selEndCol = eCol;
+    selEndRow = eRow;
+    term?.select(sCol, sRow, maxIdx - minIdx + 1);
+    hasSelection = true;
+    updateHandleCoords();
+  }
+
+  function exitSelectionMode() {
+    term?.clearSelection();
+    hasSelection = false;
+    showTouchMenu = false;
+    selectionMode = false;
+    activeHandle = null;
+    startHandlePos = null;
+    endHandlePos = null;
+  }
+
+  function handleOverlayPointerDown(e: PointerEvent) {
+    e.preventDefault();
+    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+    const cell = pointToTerminalCell(e.clientX, e.clientY);
+    activeHandle = 'new';
+    selStartCol = cell.col;
+    selStartRow = cell.bufRow;
+    selEndCol = cell.col;
+    selEndRow = cell.bufRow;
+    term?.select(cell.col, cell.bufRow, 1);
+    hasSelection = true;
+    updateHandleCoords();
+  }
+
+  function handleHandlePointerDown(which: 'start' | 'end', e: PointerEvent) {
+    e.preventDefault();
+    e.stopPropagation();
+    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+    activeHandle = which;
+  }
+
+  function handleOverlayPointerMove(e: PointerEvent) {
+    if (!activeHandle) return;
+    e.preventDefault();
+    // Offset slightly upward so finger doesn't cover the target row
+    const cell = pointToTerminalCell(e.clientX, e.clientY - (activeHandle === 'new' ? 0 : 18));
+    if (activeHandle === 'start') {
+      applyOrderedSelection(cell.col, cell.bufRow, selEndCol, selEndRow, cell.cols);
+    } else if (activeHandle === 'end') {
+      applyOrderedSelection(selStartCol, selStartRow, cell.col, cell.bufRow, cell.cols);
+    } else {
+      applyOrderedSelection(selStartCol, selStartRow, cell.col, cell.bufRow, cell.cols);
+    }
+  }
+
+  function handleOverlayPointerUp(e: PointerEvent) {
+    if (!activeHandle) return;
+    e.preventDefault();
+    activeHandle = null;
+  }
+
+  async function handleCopySelection() {
+    const sel = term?.getSelection() ?? '';
+    if (!sel) return;
+    try {
+      const bridge = (window as any).AndroidClipboard;
+      if (bridge?.writeText) {
+        bridge.writeText(sel);
+      } else {
+        await navigator.clipboard.writeText(sel);
+      }
+      toast.success('Copied');
+    } catch {
+      toast.error('Clipboard permission denied');
+    }
+    exitSelectionMode();
+  }
+
+  async function handlePasteClipboard() {
+    try {
+      const bridge = (window as any).AndroidClipboard;
+      const text = bridge?.readText ? String(bridge.readText()) : await navigator.clipboard.readText();
+      if (!text) {
+        toast.info('Clipboard is empty');
+        return;
+      }
+      sendTerminalInput(text);
+    } catch {
+      toast.error('Clipboard read blocked by system');
+    }
+    exitSelectionMode();
+    term?.focus();
+  }
+
+  function changeFontSize(delta: number) {
+    const next = Math.min(20, Math.max(9, fontSize + delta));
+    fontSize = next;
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('opentermius_term_fontsize', String(next));
+    }
+    if (term) {
+      term.options.fontSize = next;
+      try { fitAddon?.fit(); } catch {}
+    }
+  }
 
   function toggleDockPosition() {
     dockTop = !dockTop;
@@ -230,7 +442,7 @@
     term = new Terminal({
       cursorBlink: true,
       fontFamily: 'Menlo, Monaco, "Courier New", monospace',
-      fontSize: platform.isMobile ? 12 : 14,
+      fontSize,
       lineHeight: 1.25,
       theme: {
         background: '#0a0a0c',
@@ -268,6 +480,52 @@
       });
     });
 
+    term.onSelectionChange(() => {
+      hasSelection = term?.hasSelection() ?? false;
+      if (hasSelection) showTouchMenu = true;
+    });
+
+    // Long-press (250ms) activates touch-locked Selection Mode overlay
+    let lpTimer: ReturnType<typeof setTimeout> | null = null;
+    let startX = 0;
+    let startY = 0;
+
+    const onTouchStart = (e: TouchEvent) => {
+      if (selectionMode || e.touches.length !== 1) return;
+      const t = e.touches[0];
+      startX = t.clientX;
+      startY = t.clientY;
+      if (lpTimer) clearTimeout(lpTimer);
+      lpTimer = setTimeout(() => {
+        navigator.vibrate?.(25);
+        const cell = pointToTerminalCell(startX, startY);
+        selectionMode = true;
+        showTouchMenu = true;
+        selectWordAt(cell.col, cell.bufRow);
+      }, 250);
+    };
+
+    const onTouchMove = (e: TouchEvent) => {
+      if (selectionMode || e.touches.length !== 1) return;
+      const t = e.touches[0];
+      if (Math.hypot(t.clientX - startX, t.clientY - startY) > 18 && lpTimer) {
+        clearTimeout(lpTimer);
+        lpTimer = null;
+      }
+    };
+
+    const onTouchEnd = () => {
+      if (lpTimer) {
+        clearTimeout(lpTimer);
+        lpTimer = null;
+      }
+    };
+
+    terminalContainer.addEventListener('touchstart', onTouchStart, { passive: true, capture: true });
+    terminalContainer.addEventListener('touchmove', onTouchMove, { passive: true, capture: true });
+    terminalContainer.addEventListener('touchend', onTouchEnd, { passive: true, capture: true });
+    terminalContainer.addEventListener('touchcancel', onTouchEnd, { passive: true, capture: true });
+
     // Auto-fit on window resize
     resizeObserver = new ResizeObserver(() => {
       try {
@@ -290,10 +548,15 @@
 
     return () => {
       window.removeEventListener('opentermius:run-snippet', handleSnippetEvent);
+      terminalContainer?.removeEventListener('touchstart', onTouchStart, true);
+      terminalContainer?.removeEventListener('touchmove', onTouchMove, true);
+      terminalContainer?.removeEventListener('touchend', onTouchEnd, true);
+      terminalContainer?.removeEventListener('touchcancel', onTouchEnd, true);
     };
   });
 
   onDestroy(() => {
+    stopKeyRepeat();
     finalizeSessionLog();
     import('@tauri-apps/api/core').then(({ invoke }) => {
       invoke('terminal_close', { sessionId: activeSessionId }).catch(() => {});
@@ -412,154 +675,56 @@
 
   {#snippet accessoryBarSnippet()}
     {#if platform.isHandheld}
-      <!-- 2-Row Ergonomic Touch Special Keys Bar for Mobile & Tablet -->
-      <div class="shrink-0 bg-[#101018] {dockTop ? 'border-b' : 'border-t pb-1.5'} border-[#222232] px-2 pt-1.5 pb-1 space-y-1.5 select-none z-20">
-        <!-- Row 1: Modifiers (ESC, TAB, Sticky CTRL/ALT, Shortcuts, Symbols) -->
-        <div class="flex items-center gap-1.5 overflow-x-auto no-scrollbar">
-          <button
-            type="button"
-            onpointerdown={(e) => { e.preventDefault(); handleVirtualKey('ESC'); }}
-            class="h-9 min-w-[44px] px-2.5 rounded-lg bg-[#1a1a28] border border-[#2a2a3d] text-xs font-mono font-semibold text-neutral-200 active:bg-emerald-600 active:text-white transition shrink-0"
-          >
-            ESC
-          </button>
-          <button
-            type="button"
-            onpointerdown={(e) => { e.preventDefault(); handleVirtualKey('TAB'); }}
-            class="h-9 min-w-[44px] px-2.5 rounded-lg bg-[#1a1a28] border border-[#2a2a3d] text-xs font-mono font-semibold text-neutral-200 active:bg-emerald-600 active:text-white transition shrink-0"
-          >
-            TAB
-          </button>
-          <button
-            type="button"
-            onpointerdown={(e) => { e.preventDefault(); handleVirtualKey('MOD_CTRL'); }}
-            class="h-9 min-w-[48px] px-2.5 rounded-lg border text-xs font-mono font-bold transition shrink-0 {ctrlActive ? 'bg-emerald-500 text-black border-emerald-400 shadow-sm shadow-emerald-500/30' : 'bg-[#1a1a28] border-[#2a2a3d] text-emerald-400'}"
-          >
-            CTRL
-          </button>
-          <button
-            type="button"
-            onpointerdown={(e) => { e.preventDefault(); handleVirtualKey('MOD_ALT'); }}
-            class="h-9 min-w-[44px] px-2.5 rounded-lg border text-xs font-mono font-bold transition shrink-0 {altActive ? 'bg-cyan-500 text-black border-cyan-400 shadow-sm shadow-cyan-500/30' : 'bg-[#1a1a28] border-[#2a2a3d] text-cyan-400'}"
-          >
-            ALT
-          </button>
-          <button
-            type="button"
-            onpointerdown={(e) => { e.preventDefault(); handleVirtualKey('CTRL_C'); }}
-            class="h-9 min-w-[40px] px-2.5 rounded-lg bg-[#1a1a28] border border-rose-500/30 text-xs font-mono font-semibold text-rose-300 active:bg-rose-600 active:text-white transition shrink-0"
-          >
-            ^C
-          </button>
-          <button
-            type="button"
-            onpointerdown={(e) => { e.preventDefault(); handleVirtualKey('CTRL_D'); }}
-            class="h-9 min-w-[40px] px-2.5 rounded-lg bg-[#1a1a28] border border-[#2a2a3d] text-xs font-mono text-neutral-300 active:bg-emerald-600 active:text-white transition shrink-0"
-          >
-            ^D
-          </button>
-          <button
-            type="button"
-            onpointerdown={(e) => { e.preventDefault(); handleVirtualKey('CTRL_Z'); }}
-            class="h-9 min-w-[40px] px-2.5 rounded-lg bg-[#1a1a28] border border-[#2a2a3d] text-xs font-mono text-neutral-300 active:bg-emerald-600 active:text-white transition shrink-0"
-          >
-            ^Z
-          </button>
-          <button
-            type="button"
-            onpointerdown={(e) => { e.preventDefault(); handleVirtualKey('CTRL_L'); }}
-            class="h-9 min-w-[40px] px-2.5 rounded-lg bg-[#1a1a28] border border-[#2a2a3d] text-xs font-mono text-neutral-300 active:bg-emerald-600 active:text-white transition shrink-0"
-          >
-            ^L
-          </button>
-          {#each ['/', '-', '|', '~', ':'] as sym}
-            <button
-              type="button"
-              onpointerdown={(e) => { e.preventDefault(); handleVirtualKey(sym); }}
-              class="h-9 min-w-[38px] px-2.5 rounded-lg bg-[#1a1a28] border border-[#2a2a3d] text-xs font-mono text-neutral-200 active:bg-emerald-600 active:text-white transition shrink-0"
-            >
-              {sym}
-            </button>
-          {/each}
-        </div>
-
-        <!-- Row 2: Pinned Navigation & Dedicated Arrow Keys Cluster (Always visible without scrolling) -->
-        <div class="flex items-center justify-between gap-1.5">
-          <div class="flex items-center gap-1 overflow-x-auto no-scrollbar">
-            <button
-              type="button"
-              onpointerdown={(e) => { e.preventDefault(); toggleDockPosition(); }}
-              class="h-9 px-2 rounded-lg bg-[#161622] border border-[#28283a] text-[10px] font-semibold text-neutral-400 active:text-white shrink-0"
-              title="Move special keys bar to Top or Bottom"
-            >
-              {dockTop ? '↓ Bottom' : '↑ Top'}
-            </button>
-            <button
-              type="button"
-              onpointerdown={(e) => { e.preventDefault(); handleVirtualKey('HOME'); }}
-              class="h-9 px-2 rounded-lg bg-[#181824] border border-[#252538] text-[10px] font-mono text-neutral-300 active:bg-emerald-600 active:text-white shrink-0"
-            >
-              HOME
-            </button>
-            <button
-              type="button"
-              onpointerdown={(e) => { e.preventDefault(); handleVirtualKey('END'); }}
-              class="h-9 px-2 rounded-lg bg-[#181824] border border-[#252538] text-[10px] font-mono text-neutral-300 active:bg-emerald-600 active:text-white shrink-0"
-            >
-              END
-            </button>
-            <button
-              type="button"
-              onpointerdown={(e) => { e.preventDefault(); handleVirtualKey('PGUP'); }}
-              class="h-9 px-2 rounded-lg bg-[#181824] border border-[#252538] text-[10px] font-mono text-neutral-300 active:bg-emerald-600 active:text-white shrink-0"
-            >
-              PGUP
-            </button>
-            <button
-              type="button"
-              onpointerdown={(e) => { e.preventDefault(); handleVirtualKey('PGDN'); }}
-              class="h-9 px-2 rounded-lg bg-[#181824] border border-[#252538] text-[10px] font-mono text-neutral-300 active:bg-emerald-600 active:text-white shrink-0"
-            >
-              PGDN
-            </button>
+      <!-- Termux-style 2x7 Extra Keys Grid (Zero horizontal scroll, hold-to-repeat arrows) -->
+      {@const termuxRows = [
+        [
+          { k: 'ESC', l: 'ESC' },
+          { k: '/', l: '/' },
+          { k: '-', l: '-' },
+          { k: 'HOME', l: 'HOME' },
+          { k: 'UP', l: '↑', repeat: true },
+          { k: 'END', l: 'END' },
+          { k: 'PGUP', l: 'PGUP' }
+        ],
+        [
+          { k: 'TAB', l: 'TAB' },
+          { k: 'MOD_CTRL', l: 'CTRL', mod: 'ctrl' },
+          { k: 'MOD_ALT', l: 'ALT', mod: 'alt' },
+          { k: 'LEFT', l: '←', repeat: true },
+          { k: 'DOWN', l: '↓', repeat: true },
+          { k: 'RIGHT', l: '→', repeat: true },
+          { k: 'PGDN', l: 'PGDN' }
+        ]
+      ]}
+      <div class="shrink-0 bg-[#0d0d13] {dockTop ? 'border-b' : 'border-t'} border-[#1f202c] px-1.5 py-1 space-y-1 select-none z-20">
+        {#each termuxRows as row}
+          <div class="grid grid-cols-7 gap-1">
+            {#each row as key}
+              {@const isModOn = (key.mod === 'ctrl' && ctrlActive) || (key.mod === 'alt' && altActive)}
+              <button
+                type="button"
+                onpointerdown={(e) => {
+                  if (key.repeat) {
+                    startKeyRepeat(key.k, e);
+                  } else {
+                    e.preventDefault();
+                    handleVirtualKey(key.k);
+                  }
+                }}
+                onpointerup={() => key.repeat && stopKeyRepeat()}
+                onpointercancel={() => key.repeat && stopKeyRepeat()}
+                onpointerleave={() => key.repeat && stopKeyRepeat()}
+                class="h-8 rounded-md border text-[11px] font-mono font-medium transition flex items-center justify-center {isModOn
+                  ? 'bg-emerald-500 text-black border-emerald-400 font-bold'
+                  : key.repeat
+                    ? 'bg-[#1a1a26] border-[#2a2a3c] text-white font-bold active:bg-emerald-500 active:text-black'
+                    : 'bg-[#14141e] border-[#222230] text-neutral-300 active:bg-emerald-600 active:text-white'}"
+              >
+                {key.l}
+              </button>
+            {/each}
           </div>
-
-          <!-- Pinned Arrow Keys Cluster -->
-          <div class="flex items-center gap-1.5 shrink-0">
-            <button
-              type="button"
-              onpointerdown={(e) => { e.preventDefault(); handleVirtualKey('LEFT'); }}
-              class="h-9 w-11 rounded-lg bg-[#1e1e30] border border-emerald-500/30 text-sm font-mono font-bold text-white active:bg-emerald-500 active:text-black transition flex items-center justify-center"
-              aria-label="Left Arrow"
-            >
-              ←
-            </button>
-            <button
-              type="button"
-              onpointerdown={(e) => { e.preventDefault(); handleVirtualKey('DOWN'); }}
-              class="h-9 w-11 rounded-lg bg-[#1e1e30] border border-emerald-500/30 text-sm font-mono font-bold text-white active:bg-emerald-500 active:text-black transition flex items-center justify-center"
-              aria-label="Down Arrow"
-            >
-              ↓
-            </button>
-            <button
-              type="button"
-              onpointerdown={(e) => { e.preventDefault(); handleVirtualKey('UP'); }}
-              class="h-9 w-11 rounded-lg bg-[#1e1e30] border border-emerald-500/30 text-sm font-mono font-bold text-white active:bg-emerald-500 active:text-black transition flex items-center justify-center"
-              aria-label="Up Arrow"
-            >
-              ↑
-            </button>
-            <button
-              type="button"
-              onpointerdown={(e) => { e.preventDefault(); handleVirtualKey('RIGHT'); }}
-              class="h-9 w-11 rounded-lg bg-[#1e1e30] border border-emerald-500/30 text-sm font-mono font-bold text-white active:bg-emerald-500 active:text-black transition flex items-center justify-center"
-              aria-label="Right Arrow"
-            >
-              →
-            </button>
-          </div>
-        </div>
+        {/each}
       </div>
     {:else}
       <!-- Desktop 1-Row Compact Virtual Key Bar -->
@@ -624,6 +789,89 @@
     {/if}
 
     <div bind:this={terminalContainer} class="h-full w-full"></div>
+
+    {#if selectionMode}
+      <!-- Transparent touch-none overlay: WebView never scrolls while dragging selection -->
+      <div
+        class="absolute inset-0 z-20 touch-none border-2 border-emerald-500/40 rounded-lg bg-emerald-500/[0.02]"
+        role="application"
+        aria-label="Terminal text selection"
+        onpointerdown={handleOverlayPointerDown}
+        onpointermove={handleOverlayPointerMove}
+        onpointerup={handleOverlayPointerUp}
+        onpointercancel={handleOverlayPointerUp}
+      ></div>
+
+      {#if startHandlePos}
+        <div
+          class="absolute z-30 touch-none -translate-x-1/2 -translate-y-1 flex flex-col items-center cursor-grab active:cursor-grabbing"
+          style="left: {startHandlePos.x}px; top: {startHandlePos.y}px;"
+          role="slider"
+          aria-label="Selection start handle"
+          aria-valuenow={selStartCol}
+          tabindex="0"
+          onpointerdown={(e) => handleHandlePointerDown('start', e)}
+          onpointermove={handleOverlayPointerMove}
+          onpointerup={handleOverlayPointerUp}
+          onpointercancel={handleOverlayPointerUp}
+        >
+          <div class="h-3 w-0.5 bg-emerald-400"></div>
+          <div class="h-5 w-5 rounded-full rounded-tr-none bg-emerald-400 border-2 border-[#0a0a0c] shadow-lg shadow-emerald-500/40 -rotate-45"></div>
+          <div class="h-4 w-9 -mt-2"></div>
+        </div>
+      {/if}
+
+      {#if endHandlePos}
+        <div
+          class="absolute z-30 touch-none -translate-x-1/2 -translate-y-1 flex flex-col items-center cursor-grab active:cursor-grabbing"
+          style="left: {endHandlePos.x}px; top: {endHandlePos.y}px;"
+          role="slider"
+          aria-label="Selection end handle"
+          aria-valuenow={selEndCol}
+          tabindex="0"
+          onpointerdown={(e) => handleHandlePointerDown('end', e)}
+          onpointermove={handleOverlayPointerMove}
+          onpointerup={handleOverlayPointerUp}
+          onpointercancel={handleOverlayPointerUp}
+        >
+          <div class="h-3 w-0.5 bg-cyan-400"></div>
+          <div class="h-5 w-5 rounded-full rounded-tl-none bg-cyan-400 border-2 border-[#0a0a0c] shadow-lg shadow-cyan-500/40 rotate-45"></div>
+          <div class="h-4 w-9 -mt-2"></div>
+        </div>
+      {/if}
+    {/if}
+
+    {#if showTouchMenu}
+      <div class="absolute top-3 right-3 z-30 flex items-center gap-1 rounded-full border border-[#2c2c3e] bg-[#14141e]/95 px-2.5 py-1 shadow-2xl backdrop-blur-md animate-in fade-in zoom-in-95 duration-100">
+        {#if selectionMode}
+          <span class="px-1.5 text-[10px] font-medium text-emerald-400">Drag to select</span>
+        {/if}
+        {#if hasSelection}
+          <button
+            type="button"
+            onpointerdown={(e) => { e.preventDefault(); void handleCopySelection(); }}
+            class="flex items-center gap-1.5 rounded-full bg-emerald-500 px-3 py-1.5 text-xs font-semibold text-black active:scale-95 transition"
+          >
+            <Copy class="h-3.5 w-3.5" /> Copy
+          </button>
+        {/if}
+        <button
+          type="button"
+          onpointerdown={(e) => { e.preventDefault(); void handlePasteClipboard(); }}
+          class="flex items-center gap-1.5 rounded-full bg-[#222232] px-3 py-1.5 text-xs font-medium text-white active:scale-95 transition"
+        >
+          <ClipboardPaste class="h-3.5 w-3.5 text-cyan-400" /> Paste
+        </button>
+        <button
+          type="button"
+          onpointerdown={(e) => { e.preventDefault(); exitSelectionMode(); }}
+          class="flex h-7 w-7 items-center justify-center rounded-full text-neutral-400 hover:text-white"
+          aria-label="Dismiss"
+        >
+          <X class="h-3.5 w-3.5" />
+        </button>
+      </div>
+    {/if}
   </div>
 
   {#if showAccessoryBar && !dockTop}

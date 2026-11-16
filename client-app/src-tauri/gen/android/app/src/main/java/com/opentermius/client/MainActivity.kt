@@ -1,14 +1,46 @@
 package com.opentermius.client
 
+import android.app.Activity
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import android.os.Bundle
 import android.view.View
 import android.view.WindowManager
+import android.webkit.JavascriptInterface
 import android.webkit.WebView
+import androidx.activity.OnBackPressedCallback
 import androidx.activity.enableEdgeToEdge
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 
+class AndroidClipboardBridge(private val activity: Activity) {
+  @JavascriptInterface
+  fun readText(): String {
+    val cm = activity.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager ?: return ""
+    val clip = cm.primaryClip ?: return ""
+    if (clip.itemCount == 0) return ""
+    return clip.getItemAt(0).coerceToText(activity)?.toString() ?: ""
+  }
+
+  @JavascriptInterface
+  fun writeText(text: String) {
+    val cm = activity.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager ?: return
+    cm.setPrimaryClip(ClipData.newPlainText("OpenTermius", text))
+  }
+
+  @JavascriptInterface
+  fun moveToBackground() {
+    activity.runOnUiThread {
+      activity.moveTaskToBack(true)
+    }
+  }
+}
+
 class MainActivity : TauriActivity() {
+  override val handleBackNavigation: Boolean = false
+  private var webViewRef: WebView? = null
+
   private fun setupInsets() {
     val contentView = findViewById<View>(android.R.id.content) ?: return
     ViewCompat.setOnApplyWindowInsetsListener(contentView) { view, insets ->
@@ -34,10 +66,25 @@ class MainActivity : TauriActivity() {
     @Suppress("DEPRECATION")
     window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
     setupInsets()
+
+    onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
+      override fun handleOnBackPressed() {
+        val wv = webViewRef
+        if (wv != null) {
+          wv.post {
+            wv.evaluateJavascript("window.dispatchEvent(new CustomEvent('opentermius:android-back'))", null)
+          }
+        } else {
+          moveTaskToBack(true)
+        }
+      }
+    })
   }
 
   override fun onWebViewCreate(webView: WebView) {
     super.onWebViewCreate(webView)
+    webViewRef = webView
+    webView.addJavascriptInterface(AndroidClipboardBridge(this), "AndroidClipboard")
     webView.post {
       setupInsets()
     }

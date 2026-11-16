@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { api, type ApiVaultItem } from '../api/client';
+  import { encryptVaultPayload, decryptVaultPayload } from '../crypto/vault';
   import { toast, formatErrorMessage } from '../stores/toast.svelte';
   import {
     Key,
@@ -80,32 +81,21 @@
         return;
       }
 
-      keys = items.map((item) => {
-        let keyType = 'ED25519';
-        let publicKey = '';
-        let privateKey = '';
-        let passphrase = '';
-
-        try {
-          const parsed = JSON.parse(atob(item.ciphertext));
-          keyType = parsed.keyType || 'ED25519';
-          publicKey = parsed.publicKey || '';
-          privateKey = parsed.privateKey || '';
-          passphrase = parsed.passphrase || '';
-        } catch {
-          // fallback
-        }
-
-        return {
-          id: item.id,
-          label: item.label,
-          keyType,
-          publicKey,
-          privateKey,
-          passphrase,
-          createdAt: item.created_at
-        };
-      });
+      const secret = api.getVaultSecret(vaultId);
+      keys = await Promise.all(
+        items.map(async (item) => {
+          const parsed = await decryptVaultPayload<any>(item.ciphertext, item.nonce, secret);
+          return {
+            id: item.id,
+            label: item.label,
+            keyType: parsed?.keyType || 'ED25519',
+            publicKey: parsed?.publicKey || '',
+            privateKey: parsed?.privateKey || '',
+            passphrase: parsed?.passphrase || '',
+            createdAt: item.created_at
+          };
+        })
+      );
 
       state = 'success';
     } catch (err: unknown) {
@@ -168,8 +158,7 @@
         passphrase: newPassphrase.trim()
       };
 
-      const ciphertext = btoa(JSON.stringify(payload));
-      const nonce = btoa(crypto.randomUUID().slice(0, 12));
+      const { ciphertext, nonce } = await encryptVaultPayload(payload, api.getVaultSecret(vaultId));
 
       const created = await api.createVaultItem(vaultId, {
         kind: 'key',

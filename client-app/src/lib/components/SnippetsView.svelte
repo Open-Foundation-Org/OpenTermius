@@ -2,7 +2,7 @@
   import { onMount } from 'svelte';
   import { api, type ApiVaultItem, type ApiVault } from '../api/client';
   import { toast, formatErrorMessage } from '../stores/toast.svelte';
-  import { encryptVaultItem, decryptVaultItem } from '../crypto/vault';
+  import { encryptVaultPayload, decryptVaultPayload } from '../crypto/vault';
   import { FileCode2, Play, Plus, RefreshCw, AlertCircle, Sparkles } from 'lucide-svelte';
 
   interface Props {
@@ -38,24 +38,19 @@
         return;
       }
 
-      // Parse payload
-      snippets = items.map((item) => {
-        let script = '';
-        let category = 'General';
-        try {
-          const parsed = JSON.parse(atob(item.ciphertext));
-          script = parsed.script || '';
-          category = parsed.category || 'General';
-        } catch {
-          script = item.ciphertext;
-        }
-        return {
-          id: item.id,
-          title: item.label,
-          script,
-          category
-        };
-      });
+      // Decrypt payload
+      const secret = api.getVaultSecret(activeVaultId);
+      snippets = await Promise.all(
+        items.map(async (item) => {
+          const parsed = await decryptVaultPayload<any>(item.ciphertext, item.nonce, secret);
+          return {
+            id: item.id,
+            title: item.label,
+            script: parsed?.script || '',
+            category: parsed?.category || 'General'
+          };
+        })
+      );
 
       state = 'success';
     } catch (err: unknown) {
@@ -70,8 +65,7 @@
 
     try {
       const payload = { script: newScript, category: newCategory };
-      const ciphertext = btoa(JSON.stringify(payload));
-      const nonce = btoa(crypto.randomUUID().slice(0, 12));
+      const { ciphertext, nonce } = await encryptVaultPayload(payload, api.getVaultSecret(activeVaultId));
 
       const created = await api.createVaultItem(activeVaultId, {
         kind: 'snippet',
