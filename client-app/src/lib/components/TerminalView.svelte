@@ -2,7 +2,8 @@
   import { onMount, onDestroy } from 'svelte';
   import { Terminal } from '@xterm/xterm';
   import { FitAddon } from '@xterm/addon-fit';
-  import type { TerminalHostConfig } from '../stores/terminal.svelte';
+  import type { TerminalHostConfig, RemoteViewerConfig } from '../stores/terminal.svelte';
+  import { api } from '../api/client';
   import { platform } from '../stores/platform.svelte';
   import { toast, formatErrorMessage } from '../stores/toast.svelte';
   import {
@@ -23,6 +24,7 @@
     sessionId?: string;
     hostId: string;
     config?: TerminalHostConfig;
+    remoteConfig?: RemoteViewerConfig;
     active?: boolean;
     isSplitPane?: boolean;
     onShareMultiplayer: () => void;
@@ -36,6 +38,7 @@
     sessionId = '',
     hostId,
     config,
+    remoteConfig,
     active = true,
     isSplitPane = false,
     onShareMultiplayer,
@@ -81,7 +84,85 @@
   let activeHandle = $state<'start' | 'end' | 'new' | null>(null);
   let repeatDelayTimer: ReturnType<typeof setTimeout> | null = null;
   let repeatIntervalTimer: ReturnType<typeof setInterval> | null = null;
+  let relayWs: WebSocket | null = null;
+  let isRelaySharing = $state(false);
+  let relayViewerCount = $state(0);
+  const relayEncoder = new TextEncoder();
+  const relayDecoder = new TextDecoder();
   let sessionStartMs = 0;
+
+  function stopRelay() {
+    if (relayWs) {
+      try { relayWs.close(); } catch {}
+      relayWs = null;
+    }
+    isRelaySharing = false;
+    relayViewerCount = 0;
+  }
+
+  function startHostRelay() {
+    if (remoteConfig || (relayWs && relayWs.readyState <= WebSocket.OPEN)) return;
+    const url = api.getRelayWsUrl(activeSessionId, 'host');
+    const ws = new WebSocket(url);
+    ws.binaryType = 'arraybuffer';
+    ws.onopen = () => {
+      isRelaySharing = true;
+      toast.success('Remote relay active');
+    };
+    ws.onmessage = (ev) => {
+      if (typeof ev.data === 'string') {
+        try {
+          const msg = JSON.parse(ev.data);
+          if (msg.type === 'viewer_count') {
+            relayViewerCount = Number(msg.count) || 0;
+          }
+        } catch {}
+        return;
+      }
+      if (ev.data instanceof ArrayBuffer) {
+        const text = relayDecoder.decode(new Uint8Array(ev.data));
+        if (text) sendTerminalInput(text);
+      }
+    };
+    ws.onclose = () => {
+      isRelaySharing = false;
+      relayViewerCount = 0;
+      relayWs = null;
+    };
+    relayWs = ws;
+  }
+
+  function connectRemoteViewer() {
+    if (!remoteConfig) return;
+    connectionState = 'connecting';
+    errorMessage = null;
+    term?.writeln(`\x1b[1;36mJoining remote session (${remoteConfig.mode === 'control' ? 'Read-Write' : 'View-Only'})...\x1b[0m\r\n`);
+
+    const url = api.getRelayWsUrl(remoteConfig.sessionId, 'viewer', remoteConfig.requestId);
+    const ws = new WebSocket(url);
+    ws.binaryType = 'arraybuffer';
+    ws.onopen = () => {
+      connectionState = 'connected';
+    };
+    ws.onmessage = (ev) => {
+      if (ev.data instanceof ArrayBuffer) {
+        term?.write(relayDecoder.decode(new Uint8Array(ev.data)));
+      } else if (typeof ev.data === 'string') {
+        term?.write(ev.data);
+      }
+    };
+    ws.onerror = () => {
+      connectionState = 'error';
+      errorMessage = 'Relay WebSocket connection failed';
+    };
+    ws.onclose = () => {
+      if (connectionState !== 'error') {
+        connectionState = 'disconnected';
+        term?.writeln('\r\n\x1b[1;33mRemote relay closed.\x1b[0m\r\n');
+      }
+    };
+    relayWs = ws;
+  }
 
   function stopKeyRepeat() {
     if (repeatDelayTimer) {
@@ -317,6 +398,12 @@
   }
 
   function sendTerminalInput(data: string) {
+    if (remoteConfig) {
+      if (remoteConfig.mode === 'control' && relayWs?.readyState === WebSocket.OPEN) {
+        relayWs.send(relayEncoder.encode(data));
+      }
+      return;
+    }
     import('@tauri-apps/api/core').then(({ invoke }) => {
       invoke('terminal_write', { sessionId: activeSessionId, data }).catch(() => {});
     });
@@ -403,6 +490,9 @@
 
       unlistenData = await listen<string>(`terminal-data:${activeSessionId}`, (event) => {
         term?.write(event.payload);
+        if (relayWs && relayWs.readyState === WebSocket.OPEN && isRelaySharing) {
+          relayWs.send(relayEncoder.encode(event.payload));
+        }
       });
 
       unlistenExit = await listen(`terminal-exit:${activeSessionId}`, () => {
@@ -542,12 +632,24 @@
         term?.focus();
       }
     };
+    const handleStartRelayEvent = (e: Event) => {
+      const targetId = (e as CustomEvent<{ sessionId: string }>).detail?.sessionId;
+      if (targetId === activeSessionId) {
+        startHostRelay();
+      }
+    };
     window.addEventListener('opentermius:run-snippet', handleSnippetEvent);
+    window.addEventListener('opentermius:start-relay', handleStartRelayEvent);
 
-    connectNative();
+    if (remoteConfig) {
+      connectRemoteViewer();
+    } else {
+      connectNative();
+    }
 
     return () => {
       window.removeEventListener('opentermius:run-snippet', handleSnippetEvent);
+      window.removeEventListener('opentermius:start-relay', handleStartRelayEvent);
       terminalContainer?.removeEventListener('touchstart', onTouchStart, true);
       terminalContainer?.removeEventListener('touchmove', onTouchMove, true);
       terminalContainer?.removeEventListener('touchend', onTouchEnd, true);
@@ -557,10 +659,13 @@
 
   onDestroy(() => {
     stopKeyRepeat();
+    stopRelay();
     finalizeSessionLog();
-    import('@tauri-apps/api/core').then(({ invoke }) => {
-      invoke('terminal_close', { sessionId: activeSessionId }).catch(() => {});
-    });
+    if (!remoteConfig) {
+      import('@tauri-apps/api/core').then(({ invoke }) => {
+        invoke('terminal_close', { sessionId: activeSessionId }).catch(() => {});
+      });
+    }
     unlistenData?.();
     unlistenExit?.();
     resizeObserver?.disconnect();
@@ -651,14 +756,29 @@
         <Trash2 class="h-3.5 w-3.5" />
       </button>
 
-      <button
-        onclick={onShareMultiplayer}
-        class="flex items-center gap-1 rounded bg-emerald-600/20 border border-emerald-500/30 {btnTouch} text-xs font-semibold text-emerald-400 hover:bg-emerald-600/30 transition"
-        title="Share session via multiplayer link"
-        aria-label="Share session via multiplayer link"
-      >
-        <Share2 class="h-3.5 w-3.5" />
-      </button>
+      {#if remoteConfig}
+        <span class="rounded-full bg-indigo-500/20 border border-indigo-500/30 px-2.5 py-0.5 text-[10px] font-semibold text-indigo-300">
+          {remoteConfig.mode === 'control' ? 'Remote Control' : 'View-Only'}
+        </span>
+      {:else if isRelaySharing}
+        <button
+          type="button"
+          onclick={stopRelay}
+          class="flex items-center gap-1 rounded-full bg-emerald-500/20 border border-emerald-500/40 px-2.5 py-0.5 text-[10px] font-semibold text-emerald-300 hover:bg-rose-500/20 hover:text-rose-300 hover:border-rose-500/40 transition"
+          title="Stop remote relay"
+        >
+          Sharing ({relayViewerCount}) ×
+        </button>
+      {:else}
+        <button
+          onclick={onShareMultiplayer}
+          class="flex items-center gap-1 rounded bg-emerald-600/20 border border-emerald-500/30 {btnTouch} text-xs font-semibold text-emerald-400 hover:bg-emerald-600/30 transition"
+          title="Share session via relay"
+          aria-label="Share session via relay"
+        >
+          <Share2 class="h-3.5 w-3.5" />
+        </button>
+      {/if}
 
       {#if isSplitPane && onClosePane}
         <button

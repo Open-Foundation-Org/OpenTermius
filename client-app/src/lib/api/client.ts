@@ -59,6 +59,40 @@ export interface SftpHostConfig {
   passphrase?: string;
 }
 
+export interface ActiveSessionInfo {
+  session_id: string;
+  vault_id: string;
+  vault_name: string;
+  host_label: string;
+  started_at: string;
+}
+
+export interface DevicePresence {
+  user_id: string;
+  user_name: string;
+  user_email: string;
+  device_id: string;
+  device_name: string;
+  platform: string;
+  online: boolean;
+  last_seen_at: string;
+  active_sessions: ActiveSessionInfo[];
+}
+
+export interface RemoteRequest {
+  id: string;
+  session_id: string;
+  vault_id: string;
+  host_label: string;
+  owner_id: string;
+  requester_id: string;
+  requester_name: string;
+  requester_email: string;
+  mode: 'view' | 'control';
+  status: 'pending' | 'approved' | 'rejected';
+  created_at: string;
+}
+
 type SyncQueueOp =
   | {
       op: 'create';
@@ -102,6 +136,7 @@ class ApiClient {
   private token: string | null = null;
   private apiBase: string = 'http://localhost:8080/api/v1';
   private standalone: boolean = false;
+  private gatewayOnline: boolean = true;
   private isFlushing: boolean = false;
   private onSyncListeners: Set<(syncedCount: number) => void> = new Set();
 
@@ -737,6 +772,90 @@ class ApiClient {
       method: 'POST',
       body: JSON.stringify({ email, role })
     });
+  }
+
+  // Presence & Remote Collaboration Relay (Zero-SSH Blind Relay)
+  getDeviceId(): string {
+    if (typeof window === 'undefined') return 'server';
+    let id = localStorage.getItem('opentermius_device_id');
+    if (!id) {
+      id = crypto.randomUUID();
+      localStorage.setItem('opentermius_device_id', id);
+    }
+    return id;
+  }
+
+  isGatewayOnline(): boolean {
+    return !this.standalone && this.gatewayOnline;
+  }
+
+  async sendHeartbeat(
+    deviceName: string,
+    platformName: string,
+    activeSessions: ActiveSessionInfo[]
+  ): Promise<{ online: boolean; pending_requests: RemoteRequest[] }> {
+    if (this.standalone || !this.token) {
+      this.gatewayOnline = false;
+      return { online: false, pending_requests: [] };
+    }
+    try {
+      const res = await this.request<{ status: string; pending_requests: RemoteRequest[] }>('/presence/heartbeat', {
+        method: 'POST',
+        body: JSON.stringify({
+          device_id: this.getDeviceId(),
+          device_name: deviceName,
+          platform: platformName,
+          active_sessions: activeSessions
+        })
+      });
+      this.gatewayOnline = true;
+      return { online: true, pending_requests: res.pending_requests || [] };
+    } catch (err) {
+      if (this.isNetworkError(err)) {
+        this.gatewayOnline = false;
+      }
+      return { online: false, pending_requests: [] };
+    }
+  }
+
+  async getPresence(vaultId?: string): Promise<DevicePresence[]> {
+    if (this.standalone || !this.token) return [];
+    const qs = vaultId ? `?vault_id=${encodeURIComponent(vaultId)}` : '';
+    const res = await this.request<DevicePresence[]>(`/presence${qs}`);
+    this.gatewayOnline = true;
+    return res;
+  }
+
+  async requestRemoteSession(sessionId: string, mode: 'view' | 'control' = 'view'): Promise<RemoteRequest> {
+    return this.request<RemoteRequest>(`/sessions/${encodeURIComponent(sessionId)}/request`, {
+      method: 'POST',
+      body: JSON.stringify({ mode })
+    });
+  }
+
+  async getRemoteRequest(requestId: string): Promise<RemoteRequest> {
+    return this.request<RemoteRequest>(`/sessions/requests/${encodeURIComponent(requestId)}`);
+  }
+
+  async respondRemoteRequest(
+    requestId: string,
+    action: 'approve' | 'reject',
+    mode: 'view' | 'control' = 'view'
+  ): Promise<RemoteRequest> {
+    return this.request<RemoteRequest>(`/sessions/requests/${encodeURIComponent(requestId)}/respond`, {
+      method: 'POST',
+      body: JSON.stringify({ action, mode })
+    });
+  }
+
+  getRelayWsUrl(sessionId: string, role: 'host' | 'viewer', requestId?: string): string {
+    const wsBase = this.apiBase.replace(/^http:\/\//i, 'ws://').replace(/^https:\/\//i, 'wss://');
+    const params = new URLSearchParams({
+      token: this.token || '',
+      role
+    });
+    if (requestId) params.set('request_id', requestId);
+    return `${wsBase}/relay/${encodeURIComponent(sessionId)}?${params.toString()}`;
   }
 
   // Native SFTP File Manager Operations (via Tauri Rust russh-sftp)

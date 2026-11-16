@@ -35,6 +35,26 @@ export interface GatewaySessionLog {
   duration_secs?: number;
 }
 
+export interface GatewayActiveSession {
+  session_id: string;
+  vault_id: string;
+  vault_name: string;
+  host_label: string;
+  started_at: string;
+}
+
+export interface GatewayPresence {
+  user_id: string;
+  user_name: string;
+  user_email: string;
+  device_id: string;
+  device_name: string;
+  platform: string;
+  online: boolean;
+  last_seen_at: string;
+  active_sessions: GatewayActiveSession[];
+}
+
 class GatewayApiClient {
   private apiBase: string = 'http://localhost:8080/api/v1';
   private token: string | null = null;
@@ -167,6 +187,10 @@ class GatewayApiClient {
 
   async getSessionLogs(): Promise<GatewaySessionLog[]> {
     return this.request<GatewaySessionLog[]>('/logs');
+  }
+
+  async getPresence(): Promise<GatewayPresence[]> {
+    return this.request<GatewayPresence[]>('/presence');
   }
 }
 

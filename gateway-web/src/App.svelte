@@ -5,7 +5,8 @@
     type GatewayUser,
     type GatewayVault,
     type GatewayMember,
-    type GatewaySessionLog
+    type GatewaySessionLog,
+    type GatewayPresence
   } from './lib/api/gateway_client';
   import {
     Server,
@@ -46,6 +47,7 @@
   let selectedTeamVaultId = $state('');
   let teamMembers = $state<GatewayMember[]>([]);
   let sessionLogs = $state<GatewaySessionLog[]>([]);
+  let presenceList = $state<GatewayPresence[]>([]);
   let loadState = $state<'loading' | 'success' | 'empty' | 'error'>('loading');
   let errorMessage = $state<string | null>(null);
   let statusBanner = $state<string | null>(null);
@@ -107,13 +109,15 @@
     errorMessage = null;
 
     try {
-      const [loadedUsers, loadedVaults] = await Promise.all([
+      const [loadedUsers, loadedVaults, loadedPresence] = await Promise.all([
         gatewayApi.getUsers().catch(() => [] as GatewayUser[]),
-        gatewayApi.getVaults()
+        gatewayApi.getVaults(),
+        gatewayApi.getPresence().catch(() => [] as GatewayPresence[])
       ]);
 
       users = loadedUsers;
       vaults = loadedVaults;
+      presenceList = loadedPresence;
 
       const tVaults = loadedVaults.filter((v) => v.type === 'team');
       if (tVaults.length > 0) {
@@ -275,6 +279,12 @@
 
   onMount(() => {
     checkAuthAndLoad();
+    const timer = setInterval(() => {
+      if (isAuthenticated && activeTab === 'overview') {
+        gatewayApi.getPresence().then((list) => (presenceList = list)).catch(() => {});
+      }
+    }, 5000);
+    return () => clearInterval(timer);
   });
 </script>
 
@@ -564,10 +574,59 @@
             </div>
 
             <div class="rounded-xl border border-[#222233] bg-[#12121c] p-4 space-y-1">
-              <span class="text-xs text-neutral-400">Zero-Knowledge</span>
-              <div class="text-sm font-bold text-emerald-400 pt-1">100% Client-Side</div>
-              <p class="text-[10px] text-neutral-400">AES-256-GCM Encrypted</p>
+              <span class="text-xs text-neutral-400">Online Devices</span>
+              <div class="text-2xl font-bold text-emerald-400">{presenceList.filter((p) => p.online).length}</div>
+              <p class="text-[10px] text-neutral-400">
+                {presenceList.reduce((acc, p) => acc + (p.online ? p.active_sessions.length : 0), 0)} Active SSH Session(s)
+              </p>
             </div>
+          </div>
+
+          <!-- Live Online Presence & Active SSH Sessions -->
+          <div class="rounded-xl border border-[#222233] bg-[#12121c] p-5 space-y-3 text-xs">
+            <div class="flex items-center justify-between">
+              <h3 class="font-semibold text-white">Live Online Users &amp; Active SSH</h3>
+              <button
+                type="button"
+                onclick={async () => { presenceList = await gatewayApi.getPresence().catch(() => []); }}
+                class="text-[11px] text-emerald-400 hover:underline"
+              >
+                Refresh Live
+              </button>
+            </div>
+            {#if presenceList.filter((p) => p.online).length === 0}
+              <p class="text-neutral-400 py-3">No client devices currently online.</p>
+            {:else}
+              <div class="divide-y divide-[#1d1d2b]">
+                {#each presenceList.filter((p) => p.online) as dev (dev.user_id + dev.device_id)}
+                  <div class="py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                    <div class="flex items-center gap-2.5">
+                      <span class="h-2.5 w-2.5 rounded-full bg-emerald-400 shrink-0"></span>
+                      <div>
+                        <p class="font-semibold text-white">
+                          {dev.user_name}
+                          <span class="text-neutral-400 font-normal">({dev.user_email})</span>
+                        </p>
+                        <p class="text-[11px] text-neutral-400 capitalize">
+                          {dev.device_name} · {dev.platform}
+                        </p>
+                      </div>
+                    </div>
+                    <div class="flex flex-wrap gap-1.5">
+                      {#if dev.active_sessions.length === 0}
+                        <span class="rounded-full bg-[#1a1a28] px-2.5 py-1 text-[11px] text-neutral-400">Idle</span>
+                      {:else}
+                        {#each dev.active_sessions as sess (sess.session_id)}
+                          <span class="rounded-full bg-emerald-500/15 border border-emerald-500/30 px-2.5 py-1 text-[11px] font-mono text-emerald-300">
+                            SSH: {sess.host_label}
+                          </span>
+                        {/each}
+                      {/if}
+                    </div>
+                  </div>
+                {/each}
+              </div>
+            {/if}
           </div>
 
           <!-- Infrastructure Specs Table -->

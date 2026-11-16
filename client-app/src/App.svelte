@@ -19,7 +19,13 @@
   import { terminalStore } from './lib/stores/terminal.svelte';
   import { platform } from './lib/stores/platform.svelte';
   import { toast, formatErrorMessage } from './lib/stores/toast.svelte';
-  import { api, type ApiVault, type ApiVaultItem } from './lib/api/client';
+  import {
+    api,
+    type ApiVault,
+    type ApiVaultItem,
+    type DevicePresence,
+    type RemoteRequest
+  } from './lib/api/client';
   import { encryptVaultPayload, decryptVaultPayload } from './lib/crypto/vault';
   import {
     Plus,
@@ -73,6 +79,11 @@
   let isVaultSwitcherOpen = $state(false);
   let showBootSplash = $state(true);
   let sftpSelectedHostId = $state('');
+  let currentUserId = $state('');
+  let gatewayOnline = $state(true);
+  let teamPresence = $state<DevicePresence[]>([]);
+  let incomingRemoteRequests = $state<RemoteRequest[]>([]);
+  let pendingOutboundRequestId = $state<string | null>(null);
 
   function handleOpenSftp(host: any) {
     sftpSelectedHostId = host.id;
@@ -166,7 +177,8 @@
         return;
       }
 
-      await api.getMe();
+      const me = await api.getMe();
+      currentUserId = me.id;
       isAuthenticated = true;
 
       // 2. Load Vaults from Backend
@@ -412,16 +424,22 @@
   }
 
   function handleConnect(host: any) {
-    terminalStore.openTab(host.id, `${host.username}@${host.label}`, {
-      address: host.address,
-      port: host.port,
-      username: host.username,
-      authType: host.authType,
-      password: host.authType === 'key' ? '' : host.password,
-      privateKey: host.authType === 'key' ? host.privateKey : '',
-      passphrase: host.authType === 'key' ? host.passphrase : ''
-    });
+    terminalStore.openTab(
+      host.id,
+      `${host.username}@${host.label}`,
+      {
+        address: host.address,
+        port: host.port,
+        username: host.username,
+        authType: host.authType,
+        password: host.authType === 'key' ? '' : host.password,
+        privateKey: host.authType === 'key' ? host.privateKey : '',
+        passphrase: host.authType === 'key' ? host.passphrase : ''
+      },
+      { vaultId: activeVault?.id, vaultName: activeVault?.name }
+    );
     activeNav = 'terminal';
+    void runPresenceHeartbeat();
   }
 
   function handleNewLocalTab() {
@@ -475,6 +493,102 @@
     await loadHosts();
   }
 
+  async function runPresenceHeartbeat() {
+    if (!isAuthenticated || api.isStandalone()) {
+      gatewayOnline = false;
+      teamPresence = [];
+      return;
+    }
+    const activeSessions = terminalStore.tabs
+      .filter((t) => !t.remoteConfig)
+      .map((t) => ({
+        session_id: t.id,
+        vault_id: t.vaultId || activeVault?.id || '',
+        vault_name: t.vaultName || activeVault?.name || 'Vault',
+        host_label: t.label,
+        started_at: t.startedAt
+      }));
+
+    const deviceName = platform.isAndroid ? 'Android Device' : platform.isMac ? 'macOS Desktop' : 'Desktop Client';
+    const res = await api.sendHeartbeat(deviceName, platform.layoutMode, activeSessions);
+    gatewayOnline = res.online;
+    incomingRemoteRequests = res.pending_requests;
+
+    if (res.online && activeVault?.type === 'team') {
+      try {
+        teamPresence = await api.getPresence(activeVault.id);
+      } catch {
+        teamPresence = [];
+      }
+    } else {
+      teamPresence = [];
+    }
+  }
+
+  async function handleRequestRemote(sessionId: string, hostLabel: string, ownerName: string, mode: 'view' | 'control') {
+    try {
+      const req = await api.requestRemoteSession(sessionId, mode);
+      pendingOutboundRequestId = req.id;
+      toast.info(`Requested ${mode} access to ${hostLabel}. Waiting for ${ownerName}...`);
+
+      let attempts = 0;
+      const poll = setInterval(async () => {
+        attempts++;
+        if (attempts > 40 || pendingOutboundRequestId !== req.id) {
+          clearInterval(poll);
+          if (pendingOutboundRequestId === req.id) pendingOutboundRequestId = null;
+          return;
+        }
+        try {
+          const latest = await api.getRemoteRequest(req.id);
+          if (latest.status === 'approved') {
+            clearInterval(poll);
+            pendingOutboundRequestId = null;
+            terminalStore.openTab(
+              `remote-${latest.session_id}`,
+              `${latest.host_label} (${latest.mode})`,
+              undefined,
+              {
+                vaultId: latest.vault_id,
+                remoteConfig: {
+                  sessionId: latest.session_id,
+                  requestId: latest.id,
+                  mode: latest.mode,
+                  ownerName
+                }
+              }
+            );
+            activeNav = 'terminal';
+            toast.success(`Connected to ${latest.host_label} (${latest.mode})`);
+          } else if (latest.status === 'rejected') {
+            clearInterval(poll);
+            pendingOutboundRequestId = null;
+            toast.error('Remote access request declined');
+          }
+        } catch {
+          // ignore transient poll error
+        }
+      }, 1500);
+    } catch (err: unknown) {
+      toast.error(err, 'Failed to request remote access');
+    }
+  }
+
+  async function handleRespondRemote(req: RemoteRequest, action: 'approve' | 'reject', mode: 'view' | 'control' = req.mode) {
+    try {
+      await api.respondRemoteRequest(req.id, action, mode);
+      incomingRemoteRequests = incomingRemoteRequests.filter((r) => r.id !== req.id);
+      if (action === 'approve') {
+        window.dispatchEvent(new CustomEvent('opentermius:start-relay', { detail: { sessionId: req.session_id } }));
+        toast.success(`Granted ${mode} access to ${req.requester_name}`);
+      } else {
+        toast.info(`Declined request from ${req.requester_name}`);
+      }
+    } catch (err: unknown) {
+      toast.error(err, 'Failed to respond to request');
+    }
+  }
+
   async function silentBackgroundSync() {
     if (!isAuthenticated || api.isStandalone() || isAddHostOpen || isMoveModalOpen) return;
     try {
@@ -502,8 +616,13 @@
       void loadHosts();
     });
     const syncTimer = setInterval(silentBackgroundSync, 15000);
-    const onFocus = () => void silentBackgroundSync();
+    const heartbeatTimer = setInterval(runPresenceHeartbeat, 8000);
+    const onFocus = () => {
+      void silentBackgroundSync();
+      void runPresenceHeartbeat();
+    };
     window.addEventListener('focus', onFocus);
+    void runPresenceHeartbeat();
 
     let lastBackMs = 0;
     const onAndroidBack = () => {
@@ -537,6 +656,7 @@
     return () => {
       unsubSync();
       clearInterval(syncTimer);
+      clearInterval(heartbeatTimer);
       window.removeEventListener('focus', onFocus);
       window.removeEventListener('opentermius:android-back', onAndroidBack);
     };
@@ -749,8 +869,9 @@
               <Laptop class="h-3 w-3" /> Standalone
             </button>
           {:else}
-            <div class="hidden md:flex items-center gap-1 rounded bg-emerald-500/15 border border-emerald-500/30 px-2 py-1 text-[10px] font-semibold text-emerald-400">
-              <Radio class="h-3 w-3" /> Gateway
+            <div class="hidden md:flex items-center gap-1.5 rounded px-2.5 py-1 text-[10px] font-semibold border {gatewayOnline ? 'bg-emerald-500/15 border-emerald-500/30 text-emerald-400' : 'bg-amber-500/15 border-amber-500/30 text-amber-300'}">
+              <span class="h-1.5 w-1.5 rounded-full {gatewayOnline ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'}"></span>
+              {gatewayOnline ? 'Online · Gateway' : 'Offline · Local'}
             </div>
           {/if}
 
@@ -1021,6 +1142,53 @@
                 {/each}
               </div>
             {/if}
+
+            <!-- Live Team Sessions (Request Remote via Gateway Relay) -->
+            {#if activeVault?.type === 'team' && gatewayOnline}
+              {@const activeTeamPeers = teamPresence.filter((p) => p.online && p.active_sessions.length > 0 && p.device_id !== api.getDeviceId())}
+              {#if activeTeamPeers.length > 0}
+                <div class="rounded-2xl border border-indigo-500/30 bg-indigo-950/20 p-3 space-y-2">
+                  <div class="flex items-center justify-between">
+                    <span class="text-[11px] font-semibold text-indigo-300 uppercase tracking-wider">
+                      Team Live SSH ({activeTeamPeers.reduce((n, p) => n + p.active_sessions.length, 0)})
+                    </span>
+                    <span class="text-[10px] text-neutral-400">Encrypted Relay</span>
+                  </div>
+                  <div class="space-y-1.5">
+                    {#each activeTeamPeers as peer (peer.user_id + peer.device_id)}
+                      {#each peer.active_sessions as sess (sess.session_id)}
+                        <div class="flex flex-wrap items-center justify-between gap-2 rounded-xl bg-[#11121c] border border-[#232538] px-3 py-2 text-xs">
+                          <div class="min-w-0">
+                            <p class="font-semibold text-white truncate">{sess.host_label}</p>
+                            <p class="text-[11px] text-neutral-400 truncate">
+                              {peer.user_name} · {peer.platform}
+                            </p>
+                          </div>
+                          <div class="flex items-center gap-1.5 shrink-0">
+                            <button
+                              type="button"
+                              disabled={Boolean(pendingOutboundRequestId)}
+                              onclick={() => handleRequestRemote(sess.session_id, sess.host_label, peer.user_name, 'view')}
+                              class="rounded-lg bg-[#1d2033] border border-indigo-500/30 px-2.5 py-1.5 text-[11px] font-medium text-indigo-300 hover:bg-indigo-600/20 disabled:opacity-50"
+                            >
+                              Request View
+                            </button>
+                            <button
+                              type="button"
+                              disabled={Boolean(pendingOutboundRequestId)}
+                              onclick={() => handleRequestRemote(sess.session_id, sess.host_label, peer.user_name, 'control')}
+                              class="rounded-lg bg-emerald-600 px-2.5 py-1.5 text-[11px] font-semibold text-white hover:bg-emerald-500 disabled:opacity-50"
+                            >
+                              Request Control
+                            </button>
+                          </div>
+                        </div>
+                      {/each}
+                    {/each}
+                  </div>
+                </div>
+              {/if}
+            {/if}
           </div>
 
           <!-- 4 UI States for Hosts -->
@@ -1155,6 +1323,7 @@
                       title={tab.label}
                       hostId={tab.hostId}
                       config={tab.config}
+                      remoteConfig={tab.remoteConfig}
                       active={activeNav === 'terminal' && tab.id === terminalStore.activeTabId}
                       onShareMultiplayer={() => (isMultiplayerOpen = true)}
                       onSplitRight={() => handleSplitTerminal('horizontal')}
@@ -1326,7 +1495,7 @@
               />
             </div>
             <div class="pt-2 border-t border-[#20202c] flex items-center justify-between">
-              <span class="text-neutral-400 font-mono text-[11px]">OpenTermius v0.1.5</span>
+              <span class="text-neutral-400 font-mono text-[11px]">OpenTermius v0.2.0</span>
               <button
                 type="button"
                 onclick={handleSignOut}
@@ -1603,6 +1772,44 @@
   />
 
   <ToastContainer />
+
+  {#if incomingRemoteRequests.length > 0}
+    {@const req = incomingRemoteRequests[0]}
+    <div class="fixed top-4 right-4 left-4 sm:left-auto sm:w-96 z-[80] rounded-2xl border border-emerald-500/40 bg-[#14141f]/95 p-4 shadow-2xl backdrop-blur-md space-y-3 animate-in fade-in slide-in-from-top-2 duration-150">
+      <div class="flex items-start justify-between gap-2">
+        <div>
+          <p class="text-xs font-bold text-emerald-400 uppercase tracking-wider">Remote Access Request</p>
+          <p class="text-sm font-semibold text-white mt-0.5">{req.requester_name} <span class="text-xs font-normal text-neutral-400">({req.requester_email})</span></p>
+          <p class="text-xs text-neutral-300 mt-0.5">
+            Wants <span class="font-semibold text-cyan-300">{req.mode === 'control' ? 'Control (Read-Write)' : 'View-Only'}</span> on <span class="font-mono text-white">{req.host_label}</span>
+          </p>
+        </div>
+      </div>
+      <div class="grid grid-cols-3 gap-2 text-xs font-semibold">
+        <button
+          type="button"
+          onclick={() => handleRespondRemote(req, 'reject')}
+          class="rounded-xl bg-[#222232] py-2 text-neutral-300 hover:text-white"
+        >
+          Decline
+        </button>
+        <button
+          type="button"
+          onclick={() => handleRespondRemote(req, 'approve', 'view')}
+          class="rounded-xl bg-indigo-600 py-2 text-white hover:bg-indigo-500"
+        >
+          View Only
+        </button>
+        <button
+          type="button"
+          onclick={() => handleRespondRemote(req, 'approve', 'control')}
+          class="rounded-xl bg-emerald-600 py-2 text-white hover:bg-emerald-500"
+        >
+          Allow Control
+        </button>
+      </div>
+    </div>
+  {/if}
 
   {#if showBootSplash}
     <BootSplash onDone={() => (showBootSplash = false)} />

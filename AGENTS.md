@@ -37,6 +37,10 @@ Before adding ANY new function, endpoint, route, or UI component:
 
 ## 6. Release & Packaging Workflow (APK + DMG + GitHub Release)
 When releasing new client-app changes, ALWAYS bump the version and publish a new GitHub Release:
+0. **Auto-Determine SemVer Bump (`X.Y.Z`)** from changes since the last tag (`git log <last-tag>..HEAD`):
+   - **MAJOR (`X+1.0.0`):** Breaking API/schema/encryption changes or incompatible protocol overhaul.
+   - **MINOR (`X.Y+1.0`):** New user-facing features, capabilities, or new endpoints/views (e.g., Remote Relay, Presence, E2EE wiring).
+   - **PATCH (`X.Y.Z+1`):** Bug fixes, UI/UX tweaks, performance/refactor, or small polish without new major features.
 1. **Bump Version (`X.Y.Z`)** in:
    - `client-app/package.json`
    - `client-app/src-tauri/tauri.conf.json`

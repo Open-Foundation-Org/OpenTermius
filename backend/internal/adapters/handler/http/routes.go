@@ -15,22 +15,25 @@ type contextKey string
 const userIDKey contextKey = "user_id"
 
 type Router struct {
-	mux          *http.ServeMux
-	authService  ports.AuthService
-	authHandler  *AuthHandler
-	vaultHandler *VaultHandler
+	mux           *http.ServeMux
+	authService   ports.AuthService
+	authHandler   *AuthHandler
+	vaultHandler  *VaultHandler
+	collabHandler *CollabHandler
 }
 
 func NewRouter(
 	authService ports.AuthService,
 	authHandler *AuthHandler,
 	vaultHandler *VaultHandler,
+	collabHandler *CollabHandler,
 ) *Router {
 	r := &Router{
-		mux:          http.NewServeMux(),
-		authService:  authService,
-		authHandler:  authHandler,
-		vaultHandler: vaultHandler,
+		mux:           http.NewServeMux(),
+		authService:   authService,
+		authHandler:   authHandler,
+		vaultHandler:  vaultHandler,
+		collabHandler: collabHandler,
 	}
 	r.registerRoutes()
 	return r
@@ -62,6 +65,14 @@ func (r *Router) registerRoutes() {
 	// Protected Vault Members
 	r.mux.Handle("GET /api/v1/vaults/{id}/members", r.authMiddleware(http.HandlerFunc(r.vaultHandler.ListMembers)))
 	r.mux.Handle("POST /api/v1/vaults/{id}/members", r.authMiddleware(http.HandlerFunc(r.vaultHandler.InviteMember)))
+
+	// Protected Presence & Remote Collaboration Relay (Zero-SSH Blind Relay)
+	r.mux.Handle("POST /api/v1/presence/heartbeat", r.authMiddleware(http.HandlerFunc(r.collabHandler.Heartbeat)))
+	r.mux.Handle("GET /api/v1/presence", r.authMiddleware(http.HandlerFunc(r.collabHandler.ListPresence)))
+	r.mux.Handle("POST /api/v1/sessions/{sessionId}/request", r.authMiddleware(http.HandlerFunc(r.collabHandler.RequestRemote)))
+	r.mux.Handle("GET /api/v1/sessions/requests/{requestId}", r.authMiddleware(http.HandlerFunc(r.collabHandler.GetRequest)))
+	r.mux.Handle("POST /api/v1/sessions/requests/{requestId}/respond", r.authMiddleware(http.HandlerFunc(r.collabHandler.RespondRemote)))
+	r.mux.HandleFunc("GET /api/v1/relay/{sessionId}", r.collabHandler.RelayWS)
 }
 
 func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {

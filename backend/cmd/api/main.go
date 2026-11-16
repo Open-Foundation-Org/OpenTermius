@@ -56,6 +56,7 @@ func main() {
 	// 3. Initialize UseCases (Application Business Rules)
 	authUC := usecase.NewAuthUseCase(userRepo, jwtSecret, 72*time.Hour)
 	vaultUC := usecase.NewVaultUseCase(vaultRepo, userRepo)
+	presenceUC := usecase.NewPresenceUseCase(vaultRepo, userRepo)
 
 	// 3b. Ensure Default Gateway Admin Account Exists
 	if pool != nil {
@@ -70,9 +71,10 @@ func main() {
 	// 4. Initialize Handlers
 	authHandler := httpAdapter.NewAuthHandler(authUC)
 	vaultHandler := httpAdapter.NewVaultHandler(vaultUC)
+	collabHandler := httpAdapter.NewCollabHandler(presenceUC, authUC)
 
 	// 5. Initialize Router
-	router := httpAdapter.NewRouter(authUC, authHandler, vaultHandler)
+	router := httpAdapter.NewRouter(authUC, authHandler, vaultHandler, collabHandler)
 
 	server := &http.Server{
 		Addr:         ":" + port,

@@ -10,11 +10,22 @@ export interface TerminalHostConfig {
   passphrase?: string;
 }
 
+export interface RemoteViewerConfig {
+  sessionId: string;
+  requestId: string;
+  mode: 'view' | 'control';
+  ownerName: string;
+}
+
 export interface TerminalTab {
   id: string;
   hostId: string;
   label: string;
+  vaultId?: string;
+  vaultName?: string;
+  startedAt: string;
   config?: TerminalHostConfig;
+  remoteConfig?: RemoteViewerConfig;
   connected: boolean;
   active: boolean;
 }
@@ -36,13 +47,22 @@ class TerminalStore {
 
   tabCount = $derived(this.tabs.length);
 
-  openTab(hostId: string, label: string, config?: TerminalHostConfig): string {
+  openTab(
+    hostId: string,
+    label: string,
+    config?: TerminalHostConfig,
+    meta?: { vaultId?: string; vaultName?: string; remoteConfig?: RemoteViewerConfig }
+  ): string {
     const id = crypto.randomUUID();
     const newTab: TerminalTab = {
       id,
       hostId,
       label,
+      vaultId: meta?.vaultId,
+      vaultName: meta?.vaultName,
+      startedAt: new Date().toISOString(),
       config,
+      remoteConfig: meta?.remoteConfig,
       connected: false,
       active: true
     };
@@ -63,6 +83,7 @@ class TerminalStore {
       id,
       hostId,
       label,
+      startedAt: new Date().toISOString(),
       config,
       connected: false,
       active: true
