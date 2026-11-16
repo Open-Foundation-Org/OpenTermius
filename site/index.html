@@ -292,7 +292,7 @@
           <div class="dots">
             <span class="dot r"></span><span class="dot y"></span><span class="dot g"></span>
           </div>
-          <span class="player-title" id="player-title">OpenTermius v0.1.4 — 01. Native Rust SSH</span>
+          <span class="player-title" id="player-title">OpenTermius v0.2.0 — 01. Native Rust SSH</span>
           <button type="button" class="play-btn" id="play-toggle">⏸ Pause</button>
         </div>
         <div class="progress-track"><div class="progress-fill" id="progress-fill"></div></div>
@@ -302,8 +302,8 @@
             <span class="sb-label">Workspace</span>
             <div class="sb-item active" data-sb="0">&gt;_ Hosts &amp; SSH</div>
             <div class="sb-item" data-sb="1">⇅ SFTP Browser</div>
-            <div class="sb-item" data-sb="2">🔒 E2EE Vaults</div>
-            <div class="sb-item" data-sb="3">⌨ Mobile Keys</div>
+            <div class="sb-item" data-sb="2">🔒 E2EE &amp; Relay</div>
+            <div class="sb-item" data-sb="3">⌨ Termux Keys</div>
             <div class="sb-item" data-sb="4">★ Zero Paywall</div>
           </aside>
 
@@ -333,23 +333,23 @@
               </div>
             </div>
 
-            <!-- Scene 3: E2EE Vaults & 15s Auto-Sync -->
+            <!-- Scene 3: E2EE Vaults & Live Remote Relay -->
             <div class="scene" data-scene="2">
               <div class="vault-flow">
                 <div class="vault-pill">
-                  <div style="font-size:11px; color:#94a3b8">Personal Vault</div>
-                  <div style="font-weight:700; margin-top:4px">WisnuAi · 192.10.1.89</div>
-                  <div style="font-size:11px; color:#34d399; margin-top:6px">AES-256-GCM Encrypted</div>
+                  <div style="font-size:11px; color:#94a3b8">Team Vault · MyHome</div>
+                  <div style="font-weight:700; margin-top:4px">WisnuAi · Live SSH</div>
+                  <div style="font-size:11px; color:#34d399; margin-top:6px">AES-256-GCM + Online Presence</div>
                 </div>
-                <div style="font-size:20px; color:#10b981; font-weight:700">→</div>
+                <div style="font-size:20px; color:#10b981; font-weight:700">⇄</div>
                 <div class="vault-pill highlight">
-                  <div style="font-size:11px; color:#34d399">Team Vault · MyHome</div>
-                  <div style="font-weight:700; margin-top:4px">Shared with 4 Members</div>
-                  <div style="font-size:11px; color:#cbd5e1; margin-top:6px">Auto-syncs every 15s across Mac &amp; Android</div>
+                  <div style="font-size:11px; color:#34d399">Request Remote · Blind Relay</div>
+                  <div style="font-weight:700; margin-top:4px">View-Only or Control</div>
+                  <div style="font-size:11px; color:#cbd5e1; margin-top:6px">SSH stays native on host; instant offline fallback</div>
                 </div>
               </div>
               <p class="term-dim" style="font-size:13px; margin-top:14px">
-                Move hosts across vaults seamlessly. Your self-hosted PostgreSQL gateway never sees plaintext passwords or SSH keys.
+                Monitor online teammates, request View or Control access in real time, and auto-fallback to local cache when offline.
               </p>
             </div>
 
@@ -358,19 +358,19 @@
               <div class="phone-mock">
                 <div class="phone-screen">
                   <div style="color:#34d399">$ vim /etc/nginx/sites-enabled/app</div>
-                  <div style="color:#64748b; margin-top:4px">~<br/>~<br/>-- INSERT --</div>
+                  <div style="color:#64748b; margin-top:4px">~<br/>-- <span style="background:rgba(16,185,129,0.25); color:#fff; padding:0 3px">192.10.1.89</span> -- [Copy | Paste]</div>
                 </div>
                 <div class="keybar">
                   <div class="keybar-row">
-                    <span class="vkey">ESC</span><span class="vkey">TAB</span><span class="vkey on">CTRL</span><span class="vkey">ALT</span><span class="vkey">^C</span>
+                    <span class="vkey">ESC</span><span class="vkey">/</span><span class="vkey">-</span><span class="vkey">HOME</span><span class="vkey">↑</span><span class="vkey">END</span>
                   </div>
                   <div class="keybar-row">
-                    <span class="vkey">↑ Top</span><span class="vkey">←</span><span class="vkey">↓</span><span class="vkey">↑</span><span class="vkey">→</span>
+                    <span class="vkey">TAB</span><span class="vkey on">CTRL</span><span class="vkey">ALT</span><span class="vkey">←</span><span class="vkey">↓</span><span class="vkey">→</span>
                   </div>
                 </div>
               </div>
               <p class="term-dim" style="font-size:13px; text-align:center; margin-top:12px">
-                2-row touch bar with sticky CTRL/ALT, pinned arrows, and Top/Bottom dock — never blocked by the bottom navbar.
+                Termux-style 2x7 extra keys, hold-to-repeat arrows, Start/End drag selection handles, and native Android clipboard.
               </p>
             </div>
 
@@ -395,10 +395,10 @@
             <span class="chap-num">02</span><span class="chap-name">SFTP Browser</span>
           </button>
           <button type="button" class="chap-btn" data-go="2">
-            <span class="chap-num">03</span><span class="chap-name">E2EE Team Vaults</span>
+            <span class="chap-num">03</span><span class="chap-name">E2EE &amp; Remote Relay</span>
           </button>
           <button type="button" class="chap-btn" data-go="3">
-            <span class="chap-num">04</span><span class="chap-name">Mobile Touch Keys</span>
+            <span class="chap-num">04</span><span class="chap-name">Termux Keys &amp; Copy</span>
           </button>
           <button type="button" class="chap-btn" data-go="4">
             <span class="chap-num">05</span><span class="chap-name">Zero Paywall</span>
@@ -410,48 +410,68 @@
 
   <section id="features">
     <div class="wrap">
-      <h2>Everything included</h2>
-      <p class="sub">Features that cost money elsewhere are free here.</p>
+      <h2>Everything included in v0.2.0</h2>
+      <p class="sub">Every core SSH, SFTP, encryption, and team collaboration feature unlocked for free.</p>
       <div class="grid">
         <div class="card">
           <div class="icon">&gt;_</div>
-          <h3>Native SSH</h3>
-          <p>Built-in Rust SSH client. Connects straight to your server, with no proxy in between.</p>
+          <h3>Native Rust SSH &amp; Split Panes</h3>
+          <p>Built-in <code>russh</code> engine with local PTY shell, split horizontal/vertical panes, and zero proxy overhead.</p>
         </div>
         <div class="card">
           <div class="icon">⇅</div>
-          <h3>SFTP file manager</h3>
-          <p>Browse, upload, download, and delete remote files from the same app.</p>
+          <h3>Built-in SFTP File Manager</h3>
+          <p>Browse directories, upload, download, create folders, and delete remote files natively via <code>russh-sftp</code>.</p>
         </div>
         <div class="card">
           <div class="icon">🔒</div>
-          <h3>Encrypted vaults</h3>
-          <p>Host credentials are encrypted on your device before they reach the server.</p>
+          <h3>AES-256-GCM E2EE Vaults</h3>
+          <p>Client-side WebCrypto PBKDF2 + AES-256-GCM encryption for Hosts, Identities, Keys, Snippets, and Tunnels.</p>
         </div>
         <div class="card">
           <div class="icon">👥</div>
-          <h3>Team vaults</h3>
-          <p>Share hosts with your team. Invite members and manage access from the web console.</p>
+          <h3>Team Vaults &amp; Host Transfer</h3>
+          <p>Share vaults with Owner, Admin, and Member roles and transfer hosts seamlessly between Personal and Team vaults.</p>
+        </div>
+        <div class="card">
+          <div class="icon">⇄</div>
+          <h3>Live Request Remote</h3>
+          <p>See teammates active SSH sessions and request View-Only or Control access over a Zero-SSH WebSocket Binary Relay.</p>
         </div>
         <div class="card">
           <div class="icon">⟳</div>
-          <h3>Sync across devices</h3>
-          <p>Changes sync between your phone, tablet, and laptop. Edits made offline sync when you reconnect.</p>
+          <h3>Auto-Online &amp; Offline Fallback</h3>
+          <p>15s background sync with automatic Online/Local switching and offline mutation queuing when away from your gateway.</p>
         </div>
         <div class="card">
           <div class="icon">⌨</div>
-          <h3>Built for touch</h3>
-          <p>Phone and tablet layouts with a special keys bar: Ctrl, Alt, Esc, Tab, and arrow keys.</p>
+          <h3>Termux 2x7 Keys &amp; Touch Select</h3>
+          <p>Sticky CTRL/ALT, hold-to-repeat arrows, Start/End drag selection handles, and native Android clipboard Copy/Paste.</p>
         </div>
         <div class="card">
-          <div class="icon">✈</div>
-          <h3>Standalone mode</h3>
-          <p>No server? Use the app on its own. Everything stays on your device.</p>
+          <div class="icon">🖥</div>
+          <h3>Gateway Web Admin Console</h3>
+          <p>Manage user accounts, team vaults, and monitor live online devices and active SSH sessions in real time.</p>
+        </div>
+        <div class="card">
+          <div class="icon">🔑</div>
+          <h3>Keychain &amp; Identities</h3>
+          <p>Store reusable ED25519/RSA private keys and credential profiles to attach to any host in one tap.</p>
         </div>
         <div class="card">
           <div class="icon">{ }</div>
-          <h3>Snippets and logs</h3>
-          <p>Save commands you run often, and look back at your session history.</p>
+          <h3>Snippets, Tunnels &amp; Logs</h3>
+          <p>Run saved shell snippets directly into active terminals, configure port tunnels, and review session logs.</p>
+        </div>
+        <div class="card">
+          <div class="icon">📱</div>
+          <h3>Mobile-Native Ergonomics</h3>
+          <p>Material 3 bottom nav, full-screen host editor, 1-tap vault switcher, swipe-back protection, and boot splash.</p>
+        </div>
+        <div class="card">
+          <div class="icon">✈</div>
+          <h3>Standalone Mode</h3>
+          <p>No server needed? Run 100% offline on your phone, tablet, or Mac with encrypted local vault storage.</p>
         </div>
       </div>
     </div>
@@ -489,6 +509,16 @@
             <td>Snippets &amp; Session Logs</td>
             <td class="yes">✓ Free</td>
             <td class="paid">Paid tier required</td>
+          </tr>
+          <tr>
+            <td>Live Presence &amp; Request Remote</td>
+            <td class="yes">✓ Free (Zero-SSH Binary Relay)</td>
+            <td class="paid">Enterprise / Team plan</td>
+          </tr>
+          <tr>
+            <td>Auto-Offline Local Fallback</td>
+            <td class="yes">✓ Built-in</td>
+            <td class="paid">Limited</td>
           </tr>
           <tr>
             <td>Zero-Knowledge Data Ownership</td>
@@ -569,11 +599,11 @@ cd ../gateway-web && npm install && npm run dev</pre>
   <script>
     (function () {
       const titles = [
-        'OpenTermius v0.1.4 — 01. Native Rust SSH',
-        'OpenTermius v0.1.4 — 02. SFTP File Manager',
-        'OpenTermius v0.1.4 — 03. E2EE Team Vaults & Sync',
-        'OpenTermius v0.1.4 — 04. Mobile & Tablet Touch Keys',
-        'OpenTermius v0.1.4 — 05. Zero Paywall Forever'
+        'OpenTermius v0.2.0 — 01. Native Rust SSH',
+        'OpenTermius v0.2.0 — 02. SFTP File Manager',
+        'OpenTermius v0.2.0 — 03. E2EE Vaults & Live Remote Relay',
+        'OpenTermius v0.2.0 — 04. Termux 2x7 Keys & Touch Selection',
+        'OpenTermius v0.2.0 — 05. Zero Paywall Forever'
       ];
       const DURATION = 5000;
       let current = 0;
