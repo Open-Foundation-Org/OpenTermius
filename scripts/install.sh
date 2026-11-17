@@ -255,10 +255,14 @@ install_deps_linux() {
 }
 
 clone_or_update_repo() {
-  # If user runs this script from inside an existing clone, use that directory
+  # If user runs this script from inside an existing clone, use that directory and pull updates
   if [ -f "./backend/go.mod" ] && [ -d "./gateway-web" ] && [ -d "./migrations" ]; then
     INSTALL_DIR="$(pwd)"
     ok "Using existing workspace: $INSTALL_DIR"
+    if [ -d "$INSTALL_DIR/.git" ]; then
+      log "Pulling latest updates in $INSTALL_DIR..."
+      git -C "$INSTALL_DIR" pull --ff-only || warn "git pull skipped (local changes present)"
+    fi
     return
   fi
 
@@ -522,6 +526,9 @@ build_components() {
 
   log "Installing & building Gateway Web UI..."
   (
+    if [ -f "$INSTALL_DIR/.env" ]; then
+      set -a; source "$INSTALL_DIR/.env"; set +a
+    fi
     cd "$INSTALL_DIR/gateway-web"
     export VITE_API_PORT="${VITE_API_PORT:-${SERVER_PORT:-8080}}"
     if [ -n "${VITE_API_BASE:-}" ]; then

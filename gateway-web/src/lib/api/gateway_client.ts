@@ -75,11 +75,16 @@ class GatewayApiClient {
   private token: string | null = null;
 
   constructor() {
+    const fallback = resolveDefaultApiBase();
     if (typeof window !== 'undefined') {
       this.token = localStorage.getItem('gateway_admin_token');
-      this.apiBase = localStorage.getItem('gateway_admin_api_base') || resolveDefaultApiBase();
+      const saved = localStorage.getItem('gateway_admin_api_base');
+      const pageHost = window.location.hostname;
+      const isRemotePage = pageHost && pageHost !== 'localhost' && pageHost !== '127.0.0.1';
+      const isStaleLocalhost = saved && /^https?:\/\/(localhost|127\.0\.0\.1)(:|\/|$)/.test(saved);
+      this.apiBase = saved && !(isRemotePage && isStaleLocalhost) ? saved : fallback;
     } else {
-      this.apiBase = resolveDefaultApiBase();
+      this.apiBase = fallback;
     }
   }
 
