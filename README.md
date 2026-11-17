@@ -1,141 +1,120 @@
-# OpenTermius
+<div align="center">
+  <img src="site/icon-256.png" alt="OpenTermius Logo" width="112" height="112" />
+  <h1>OpenTermius</h1>
+  <p><strong>Open-source, zero-paywall SSH client &amp; self-hostable team gateway for macOS and Android.</strong></p>
 
-**Website:** https://wisnu-w.github.io/OpenTermius/ · **Download:** [Latest release](https://github.com/wisnu-w/OpenTermius/releases/latest)
+  <p>
+    <a href="https://github.com/wisnu-w/OpenTermius/releases/latest">
+      <img src="https://img.shields.io/github/v/release/wisnu-w/OpenTermius?style=for-the-badge&color=10b981" alt="Latest Release" />
+    </a>
+    <a href="LICENSE">
+      <img src="https://img.shields.io/github/license/wisnu-w/OpenTermius?style=for-the-badge&color=3b82f6" alt="License" />
+    </a>
+    <img src="https://img.shields.io/badge/Platforms-macOS%20%7C%20Android%20%7C%20Linux-18181b?style=for-the-badge" alt="Platforms" />
+  </p>
 
-OpenTermius is a 100% free, self-hostable, open-source alternative to Termius. It provides modern SSH terminal management, end-to-end encrypted personal and team vaults, real-time terminal multiplayer, startup snippet automation, and session logging without any commercial paywalls or subscriptions.
-
-## Features
-- **Zero Paywalls:** All premium features (Cloud sync, Team Vaults, Session Recording, Snippets, Cloud VM discovery) free and built into core.
-- **End-to-End Encryption (E2EE):** Client-side zero-knowledge encryption with AES-GCM-256. The server never sees raw private keys or credentials.
-- **Real-time Terminal Multiplayer:** Share interactive live terminal sessions with teammates via WebSockets.
-- **Port Forwarding & Proxies:** Local Port Forwarding, Remote Tunnels, Dynamic SOCKS5 Proxy, and Jump Host (Bastion) chaining.
-- **Keychain & Identities:** Reusable SSH keys (ED25519/RSA-4096 generator + PEM import) and credential profiles.
-- **Cross-Platform Sync:** Self-hosted sync server with PostgreSQL backend.
-- **Native Multiplatform:** Lightweight (<10MB) desktop binaries for macOS, Windows, Linux, and Android via Tauri v2.
-- **Hardware Keys:** FIDO2 / WebAuthn & biometric key generation.
-- **Session Logs & Audit Trails:** Searchable terminal logs and session playback.
-
-## Architecture & Workspace Structure
-- **`backend/`**: Go 1.24 Clean Architecture (Hexagonal: `domain` -> `ports` -> `usecase` -> `adapters`). REST API & WebSocket streaming server.
-- **`client-app/`**: Multiplatform client (macOS, Windows, Linux, Android) via Tauri v2 + Svelte 5 (Runes). Supports **Connect to Gateways** (multi-device sync) and **Standalone Mode** (local-first, zero-port native in-memory PTY SSH).
-- **`gateway-web/`**: Web-based Gateway Admin & Team Management Portal (Svelte 5 + Tailwind CSS) for cluster health, team memberships, audit logs, and gateway endpoint control.
-- **`migrations/`**: Versioned PostgreSQL DDL schema & indexes.
-
-## Quickstart
-
-### Prerequisites
-- Go 1.24+
-- Node.js 22+ & npm
-- PostgreSQL 15+ (or Supabase connection via `.env`)
-
-### 0. One-Command Gateway Installer (Ubuntu / Debian / RHEL / Fedora / Arch / Alpine / macOS)
-Install PostgreSQL, Go 1.24, Node.js, database migrations, Gateway API (`:8080`), and Gateway Web UI (`:5174`) in one command:
-```bash
-curl -fsSL https://raw.githubusercontent.com/wisnu-w/OpenTermius/main/scripts/install.sh | bash
-```
-If PostgreSQL is already running (native, Docker, or external), `install.sh` detects it and skips installing a duplicate server. To target an existing/external DB directly:
-```bash
-DATABASE_URL="postgres://user:pass@host:5432/opentermius?sslmode=disable" curl -fsSL https://raw.githubusercontent.com/wisnu-w/OpenTermius/main/scripts/install.sh | bash
-```
-
-### 1. Configure Environment
-```bash
-cp .env.example .env
-```
-
-### 2. Run Database Migrations
-```bash
-# Using migrate CLI or psql
-psql -h localhost -U postgres -d opentermius -f migrations/000001_init.up.sql
-```
-
-### 3. Run Backend API & WebSocket Server
-```bash
-cd backend
-go run cmd/api/main.go
-# Server listens on http://localhost:8080
-```
-
-### 4. Run Client Application (Desktop / Web)
-```bash
-cd client-app
-npm install
-npm run dev
-# Running on http://127.0.0.1:5173
-```
-
-### 5. Run Gateway Web Admin Portal
-```bash
-cd gateway-web
-npm install
-npm run dev
-# Running on http://127.0.0.1:5174
-```
+  <p>
+    <a href="https://wisnu-w.github.io/OpenTermius/">Website</a> ·
+    <a href="https://github.com/wisnu-w/OpenTermius/releases/latest">Download App</a> ·
+    <a href="#self-host-gateway-1-command">Self-Host Gateway</a> ·
+    <a href="docs/api.md">API Docs</a>
+  </p>
+</div>
 
 ---
 
-## Multiplatform Desktop & Mobile Client (`client-app/`)
+## Features
 
-OpenTermius compiles into lightweight native binaries (<10MB installer) with native in-memory PTY (zero listening ports) and OS Keychain integration.
+- **Standalone or Gateway Mode** — Work offline with local encrypted storage, or connect to your self-hosted Gateway with automatic `Online · Gateway` / `Offline · Local` fallback.
+- **Zero-Knowledge E2EE Vaults** — Hosts, SSH keys, identities, snippets, and tunnels are encrypted on-device with WebCrypto (`PBKDF2` + `AES-256-GCM`). The server never holds your vault keys.
+- **Team Live SSH & Remote Relay** — See teammates' online presence and active SSH sessions in shared Team Vaults, request `View-Only` or `Control` access, stream PTY frames over a blind WebSocket Binary Relay, 1-click **Rejoin**, live participant avatars, typing indicators, and automatic close when the host stops sharing.
+- **Built for Mobile & Desktop** — Native `russh` SSH/SFTP client, Android Foreground Service (`SshKeepAliveService`) so lock screen/minimize never drops sessions, Termux-style 2x7 Extra Keys, touch text selection, Focus Mode, and macOS/Linux/Windows desktop support via Tauri v2.
+- **Keychain, Snippets & Tunnels** — ED25519/RSA key generator, PEM import, SFTP file manager, startup snippets, local/remote port forwarding, and session logs.
 
-### Modes of Operation
-1. **Connect to Gateways:** Connects to self-hosted OpenTermius backend cluster for real-time E2EE vault sync, team sharing, and session logs.
-2. **Standalone Mode:** Local-first offline mode. Private keys and configurations are encrypted client-side using WebCrypto AES-256-GCM in OS local sandbox. Direct outbound SSH connection via native in-memory PTY without opening any local TCP listening ports.
+---
 
-### Prerequisites for Native Builds
-- **Rust Stable:** `rustup default stable`
-- **Node.js 22+**
-- *(Optional for Android)*: Android Studio, Android SDK (`ANDROID_HOME`), and NDK (`NDK_HOME`)
+## Download Client
 
-### 1. Run Desktop in Development Mode (macOS / Windows / Linux)
-```bash
-cd client-app
-npm run tauri:dev
-```
+Grab the latest installers from **[GitHub Releases](https://github.com/wisnu-w/OpenTermius/releases/latest)**:
 
-### 2. Build macOS Desktop App (`.dmg` & `.app`)
-```bash
-cd client-app
-npm run tauri:build
-```
-Output bundles:
-- **DMG Installer:** `client-app/src-tauri/target/release/bundle/dmg/OpenTermius_0.1.0_aarch64.dmg` (~3.0 MB)
-- **App Binary:** `client-app/src-tauri/target/release/bundle/macos/opentermius.app`
+- **macOS (`aarch64` Apple Silicon):** `OpenTermius_X.Y.Z_macOS_aarch64.dmg`
+- **Android (Universal):** `OpenTermius_X.Y.Z_android_universal.apk`
 
-Untuk membuka installer DMG:
-```bash
-open client-app/src-tauri/target/release/bundle/dmg/OpenTermius_0.1.0_aarch64.dmg
-```
-
-> **macOS Gatekeeper Note (Un-notarized OSS build):**
+> [!NOTE]
+> **macOS Gatekeeper Note (Un-notarized OSS build)**
 > If macOS shows `"OpenTermius" is damaged and can't be opened` after downloading via browser, drag `OpenTermius.app` to `Applications` and run once:
 > ```bash
 > xattr -cr /Applications/OpenTermius.app
 > ```
 
-### 3. Build Android Mobile App (`.apk`)
+---
+
+## Self-Host Gateway (1-Command)
+
+Install PostgreSQL, Go 1.24+, Node.js, database migrations, Gateway API, and Gateway Web Admin Portal on **Ubuntu, Debian, Fedora, RHEL/Alma/Rocky, Arch, Alpine, or macOS**:
+
 ```bash
-cd client-app
-# Initialize Android project structure (first time only)
-npx tauri android init
-
-# Build debug APK
-npx tauri android build --debug
-
-# Or build release APK / AAB
-npx tauri android build
+curl -fsSL https://raw.githubusercontent.com/wisnu-w/OpenTermius/main/scripts/install.sh | bash
 ```
-Output APK:
-- `client-app/src-tauri/gen/android/app/build/outputs/apk/debug/app-debug.apk`
+
+- Detects existing PostgreSQL (native, Docker, or cloud like Supabase with `sslmode=require`) and busy ports (`8080`/`5174`) interactively.
+- Pass an external DB directly if preferred:
+  ```bash
+  DATABASE_URL="postgres://user:pass@host:5432/opentermius?sslmode=require" curl -fsSL https://raw.githubusercontent.com/wisnu-w/OpenTermius/main/scripts/install.sh | bash
+  ```
+- **Default Gateway Admin login:** `admin@opentermius.local` / `OpenTermius2026!` (change after first login).
+- **Client Gateway URL format:** `http://<your-server-ip>:<api-port>/api/v1` (or `https://<your-domain>/api/v1`).
 
 ---
 
-## Documentation
-- [System Architecture](docs/architecture.md)
-- [Database Schema & Indexes](docs/database.md)
-- [API & WebSocket Specifications](docs/api.md)
-- [Security & Cryptography Model](docs/security.md)
-- [Architecture Decision Records](docs/decisions/)
+## Workspace & Architecture
 
-## License
-Licensed under the [Apache License, Version 2.0](LICENSE). Copyright 2026 wisnu-w (OpenTermius Contributors).
+| Directory | Stack | Role |
+| :--- | :--- | :--- |
+| [`backend/`](backend/) | Go 1.24 (Clean / Hexagonal) | REST API, JWT auth, E2EE vault sync, Presence & WebSocket Binary Relay |
+| [`client-app/`](client-app/) | Tauri v2 + Rust (`russh`) + Svelte 5 | Multiplatform SSH/SFTP client for macOS, Android, Linux, Windows |
+| [`gateway-web/`](gateway-web/) | Svelte 5 + Tailwind CSS | Web admin portal for users, team vaults, live presence, and audit logs |
+| [`migrations/`](migrations/) | PostgreSQL SQL | Versioned schema migrations |
+| [`scripts/`](scripts/) | Bash | Cross-platform Gateway installer & service scripts |
+| [`docs/`](docs/) | Markdown | Living architecture, database, API, and security docs |
+
+---
+
+## Building from Source
+
+### Prerequisites
+- Go 1.24+, Node.js 22+, PostgreSQL 15+
+- Rust (`rustup default stable`) for desktop/mobile client builds
+- *(Android only)* Android SDK (`ANDROID_HOME`) & NDK (`NDK_HOME`)
+
+### Manual Local Development
+```bash
+# 1. Configure environment & apply migrations
+cp .env.example .env
+psql "$DATABASE_URL" -f migrations/000001_init.up.sql
+
+# 2. Run Gateway API (:8080)
+cd backend && go run cmd/api/main.go
+
+# 3. Run Gateway Web (:5174)
+cd gateway-web && npm install && npm run dev
+
+# 4. Run Desktop Client
+cd client-app && npm install && npm run tauri:dev
+```
+
+### Build Client Installers
+```bash
+# macOS DMG
+cd client-app && ./scripts/build-dmg.sh
+
+# Android Universal Release APK
+cd client-app && ./scripts/build-apk.sh release
+```
+
+---
+
+## Documentation & License
+
+- [Architecture](docs/architecture.md) · [API Reference](docs/api.md) · [Database Schema](docs/database.md) · [Security Model](docs/security.md)
+- Licensed under the [Apache-2.0 License](LICENSE).
