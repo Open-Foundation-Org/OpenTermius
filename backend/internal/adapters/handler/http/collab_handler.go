@@ -295,7 +295,12 @@ func (h *CollabHandler) RelayWS(w http.ResponseWriter, r *http.Request) {
 			if room.host == peer {
 				room.host = nil
 			}
+			endedMsg, _ := json.Marshal(map[string]any{
+				"type":   "relay_ended",
+				"reason": "Host stopped sharing this session",
+			})
 			for v := range room.viewers {
+				_ = v.send(websocket.TextMessage, endedMsg)
 				_ = v.conn.Close()
 			}
 			room.viewers = make(map[*relayPeer]struct{})

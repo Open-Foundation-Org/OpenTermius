@@ -2,7 +2,7 @@
   import { onMount, onDestroy } from 'svelte';
   import { Terminal } from '@xterm/xterm';
   import { FitAddon } from '@xterm/addon-fit';
-  import type { TerminalHostConfig, RemoteViewerConfig } from '../stores/terminal.svelte';
+  import { terminalStore, type TerminalHostConfig, type RemoteViewerConfig } from '../stores/terminal.svelte';
   import { api, type RelayParticipant } from '../api/client';
   import { platform } from '../stores/platform.svelte';
   import { toast, formatErrorMessage } from '../stores/toast.svelte';
@@ -91,6 +91,7 @@
   let typingUsers = $state<Array<{ user_id: string; user_name: string }>>([]);
   const typingTimers = new Map<string, ReturnType<typeof setTimeout>>();
   let lastHostTypingSent = 0;
+  let relayEndedByHost = false;
   const relayEncoder = new TextEncoder();
   const relayDecoder = new TextDecoder();
   let sessionStartMs = 0;
@@ -133,6 +134,14 @@
             typingUsers = typingUsers.filter((u) => u.user_id !== uid);
           }, 1800)
         );
+        return true;
+      }
+      if (msg.type === 'relay_ended') {
+        relayEndedByHost = true;
+        toast.info(msg.reason || 'Remote sharing session ended');
+        try { relayWs?.close(); } catch {}
+        relayWs = null;
+        terminalStore.closeTab(activeSessionId);
         return true;
       }
     } catch {}
@@ -212,6 +221,11 @@
     ws.onclose = () => {
       relayParticipants = [];
       typingUsers = [];
+      if (remoteConfig && !relayEndedByHost && connectionState !== 'error') {
+        toast.info('Remote sharing session ended');
+        terminalStore.closeTab(activeSessionId);
+        return;
+      }
       if (connectionState !== 'error') {
         connectionState = 'disconnected';
         term?.writeln('\r\n\x1b[1;33mRemote relay closed.\x1b[0m\r\n');
