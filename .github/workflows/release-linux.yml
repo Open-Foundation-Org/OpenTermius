@@ -1,0 +1,77 @@
+name: Build & Attach Linux Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag to attach Linux binaries to (e.g. v0.4.1)'
+        required: true
+        default: 'v0.4.1'
+
+permissions:
+  contents: write
+
+jobs:
+  build-linux:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
+
+      - name: Install Tauri Linux dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            build-essential \
+            curl \
+            wget \
+            file \
+            libxdo-dev \
+            libssl-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            patchelf
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: client-app/package-lock.json
+
+      - name: Setup Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install frontend dependencies
+        working-directory: client-app
+        run: npm ci
+
+      - name: Build Tauri Linux bundles (.deb & .AppImage)
+        working-directory: client-app
+        run: npx tauri build --bundles deb,appimage
+
+      - name: Upload Linux assets to GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG_NAME: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+        run: |
+          VER="${TAG_NAME#v}"
+          DEB_FILE=$(find client-app/src-tauri/target/release/bundle/deb -name "*.deb" | head -n 1)
+          APPIMAGE_FILE=$(find client-app/src-tauri/target/release/bundle/appimage -name "*.AppImage" | head -n 1)
+
+          ASSETS=()
+          [ -n "$DEB_FILE" ] && ASSETS+=("${DEB_FILE}#OpenTermius_${VER}_linux_amd64.deb")
+          [ -n "$APPIMAGE_FILE" ] && ASSETS+=("${APPIMAGE_FILE}#OpenTermius_${VER}_linux_amd64.AppImage")
+
+          if [ ${#ASSETS[@]} -eq 0 ]; then
+            echo "No Linux artifacts found"
+            exit 1
+          fi
+
+          gh release upload "$TAG_NAME" "${ASSETS[@]}" --clobber
