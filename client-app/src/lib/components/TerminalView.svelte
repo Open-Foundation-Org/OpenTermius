@@ -7,7 +7,6 @@
   import { platform } from '../stores/platform.svelte';
   import { toast, formatErrorMessage } from '../stores/toast.svelte';
   import {
-    Share2,
     RefreshCw,
     Trash2,
     AlertCircle,
@@ -32,7 +31,6 @@
     isSplitPane?: boolean;
     isFocusMode?: boolean;
     onToggleFocus?: () => void;
-    onShareMultiplayer: () => void;
     onSplitRight?: () => void;
     onSplitDown?: () => void;
     onClosePane?: () => void;
@@ -48,7 +46,6 @@
     isSplitPane = false,
     isFocusMode = false,
     onToggleFocus,
-    onShareMultiplayer,
     onSplitRight,
     onSplitDown,
     onClosePane
@@ -896,15 +893,6 @@
         >
           Sharing ({relayViewerCount}) ×
         </button>
-      {:else if !platform.isPhone}
-        <button
-          onclick={onShareMultiplayer}
-          class="flex items-center gap-1 rounded bg-emerald-600/20 border border-emerald-500/30 {btnTouch} text-xs font-semibold text-emerald-400 hover:bg-emerald-600/30 transition"
-          title="Share session via relay"
-          aria-label="Share session via relay"
-        >
-          <Share2 class="h-3.5 w-3.5" />
-        </button>
       {/if}
 
       {#if platform.isPhone}
@@ -942,19 +930,6 @@
               <Trash2 class="h-3.5 w-3.5 text-amber-400" />
               <span>Clear Terminal</span>
             </button>
-            {#if !remoteConfig && !isRelaySharing}
-              <button
-                type="button"
-                onclick={() => {
-                  isMoreMenuOpen = false;
-                  onShareMultiplayer();
-                }}
-                class="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-emerald-300 hover:bg-[#1e1e2e]"
-              >
-                <Share2 class="h-3.5 w-3.5" />
-                <span>Share Session</span>
-              </button>
-            {/if}
           </div>
         {/if}
       {/if}

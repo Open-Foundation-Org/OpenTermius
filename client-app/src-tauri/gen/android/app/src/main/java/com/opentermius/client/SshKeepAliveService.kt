@@ -71,7 +71,7 @@ class SshKeepAliveService : Service() {
     return NotificationCompat.Builder(this, CHANNEL_ID)
       .setContentTitle("OpenTermius SSH Active")
       .setContentText(subtitle)
-      .setSmallIcon(android.R.drawable.stat_sys_data_bluetooth)
+      .setSmallIcon(R.drawable.ic_stat_terminal)
       .setOngoing(true)
       .setSilent(true)
       .setPriority(NotificationCompat.PRIORITY_LOW)

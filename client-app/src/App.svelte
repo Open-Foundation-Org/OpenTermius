@@ -8,14 +8,12 @@
   import IdentitiesView from './lib/components/IdentitiesView.svelte';
   import SnippetsView from './lib/components/SnippetsView.svelte';
   import SessionLogsView from './lib/components/SessionLogsView.svelte';
-  import MultiplayerModal from './lib/components/MultiplayerModal.svelte';
   import AddHostDialog from './lib/components/AddHostDialog.svelte';
   import MoveHostModal from './lib/components/MoveHostModal.svelte';
   import ImportModal from './lib/components/ImportModal.svelte';
   import TunnelsView from './lib/components/TunnelsView.svelte';
   import SftpView from './lib/components/SftpView.svelte';
   import ToastContainer from './lib/components/ToastContainer.svelte';
-  import BootSplash from './lib/components/BootSplash.svelte';
   import { terminalStore } from './lib/stores/terminal.svelte';
   import { platform } from './lib/stores/platform.svelte';
   import { toast, formatErrorMessage } from './lib/stores/toast.svelte';
@@ -70,7 +68,6 @@
   let editingHost = $state<any | null>(null);
   let movingHost = $state<any | null>(null);
   let isMoveModalOpen = $state(false);
-  let isMultiplayerOpen = $state(false);
   let selectedFolderFilter = $state<string>('all');
   let collapsedFolders = $state<Record<string, boolean>>({});
   let isSidebarCollapsed = $state(false);
@@ -78,7 +75,6 @@
   let isSessionSwitcherOpen = $state(false);
   let isVaultSwitcherOpen = $state(false);
   let isTerminalFocus = $state(false);
-  let showBootSplash = $state(true);
   let sftpSelectedHostId = $state('');
   let currentUserId = $state('');
   let gatewayOnline = $state(true);
@@ -182,18 +178,19 @@
       currentUserId = me.id;
       isAuthenticated = true;
 
-      // 2. Load Vaults from Backend
+      // 2. Load Vaults from Backend (ensure user always has a Personal Vault even if invited to a Team Vault first)
       vaults = await api.getVaults();
-      if (vaults.length === 0) {
-        // Auto-provision initial Personal Cloud Vault
+      if (!vaults.some((v) => v.type === 'personal')) {
         const initialVault = await api.createVault(
           'Personal Cloud Vault',
           'personal',
           'initial-master-vault-key-aes-256'
         );
-        vaults = [initialVault];
+        vaults = [initialVault, ...vaults];
       }
-      activeVault = vaults[0];
+      if (!activeVault || !vaults.some((v) => v.id === activeVault?.id)) {
+        activeVault = vaults[0];
+      }
 
       // 3. Load Hosts from Backend Database
       await loadHosts();
@@ -641,7 +638,15 @@
   async function silentBackgroundSync() {
     if (!isAuthenticated || api.isStandalone() || isAddHostOpen || isMoveModalOpen) return;
     try {
-      const latestVaults = await api.getVaults();
+      let latestVaults = await api.getVaults();
+      if (gatewayOnline && !latestVaults.some((v) => v.type === 'personal')) {
+        const personal = await api.createVault(
+          'Personal Cloud Vault',
+          'personal',
+          'initial-master-vault-key-aes-256'
+        );
+        latestVaults = [personal, ...latestVaults];
+      }
       if (latestVaults.length > 0) {
         vaults = latestVaults;
         if (!activeVault || !latestVaults.some((v) => v.id === activeVault?.id)) {
@@ -683,7 +688,6 @@
       if (isAddHostOpen) { isAddHostOpen = false; editingHost = null; return; }
       if (isMoveModalOpen) { isMoveModalOpen = false; movingHost = null; return; }
       if (isImportOpen) { isImportOpen = false; return; }
-      if (isMultiplayerOpen) { isMultiplayerOpen = false; return; }
       if (isSessionSwitcherOpen) { isSessionSwitcherOpen = false; return; }
       if (isVaultSwitcherOpen) { isVaultSwitcherOpen = false; return; }
 
@@ -1208,24 +1212,24 @@
             {#if activeVault?.type === 'team' && gatewayOnline}
               {@const activeTeamPeers = teamPresence.filter((p) => p.online && p.active_sessions.length > 0 && p.device_id !== api.getDeviceId())}
               {#if activeTeamPeers.length > 0}
-                <div class="rounded-2xl border border-indigo-500/30 bg-indigo-950/20 p-3 space-y-2">
+                <div class="rounded-xl border border-white/[0.08] bg-[#131317] p-3 space-y-2">
                   <div class="flex items-center justify-between">
-                    <span class="text-[11px] font-semibold text-indigo-300 uppercase tracking-wider">
+                    <span class="text-[11px] font-mono font-semibold text-emerald-400 uppercase tracking-wider">
                       Team Live SSH ({activeTeamPeers.reduce((n, p) => n + p.active_sessions.length, 0)})
                     </span>
-                    <span class="text-[10px] text-neutral-400">Encrypted Relay</span>
+                    <span class="text-[10px] font-mono text-zinc-500">Blind Binary Relay</span>
                   </div>
                   <div class="space-y-1.5">
                     {#each activeTeamPeers as peer (peer.user_id + peer.device_id)}
                       {#each peer.active_sessions as sess (sess.session_id)}
-                        <div class="flex flex-wrap items-center justify-between gap-2 rounded-xl bg-[#11121c] border border-[#232538] px-3 py-2 text-xs">
+                        <div class="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-[#0e0e11] border border-white/[0.06] px-3 py-2 text-xs">
                           <div class="flex items-center gap-2.5 min-w-0">
                             <div class="flex -space-x-1.5 shrink-0">
                               {#if sess.viewers && sess.viewers.length > 0}
                                 {#each sess.viewers as v (v.user_id + v.mode)}
                                   <span
                                     title="{v.user_name} ({v.mode === 'host' ? 'Host' : v.mode === 'control' ? 'Control' : 'View'})"
-                                    class="inline-flex h-6 w-6 items-center justify-center rounded-full text-[10px] font-bold ring-2 ring-[#11121c] {getAvatarTone(v.user_id || v.user_name)}"
+                                    class="inline-flex h-6 w-6 items-center justify-center rounded-full text-[10px] font-bold ring-2 ring-[#0e0e11] {getAvatarTone(v.user_id || v.user_name)}"
                                   >
                                     {getAvatarInitials(v.user_name)}
                                   </span>
@@ -1233,15 +1237,15 @@
                               {:else}
                                 <span
                                   title="{peer.user_name} (Host)"
-                                  class="inline-flex h-6 w-6 items-center justify-center rounded-full text-[10px] font-bold ring-2 ring-[#11121c] {getAvatarTone(peer.user_id || peer.user_name)}"
+                                  class="inline-flex h-6 w-6 items-center justify-center rounded-full text-[10px] font-bold ring-2 ring-[#0e0e11] {getAvatarTone(peer.user_id || peer.user_name)}"
                                 >
                                   {getAvatarInitials(peer.user_name)}
                                 </span>
                               {/if}
                             </div>
                             <div class="min-w-0">
-                              <p class="font-semibold text-white truncate">{sess.host_label}</p>
-                              <p class="text-[11px] text-neutral-400 truncate">
+                              <p class="font-semibold text-zinc-100 truncate">{sess.host_label}</p>
+                              <p class="text-[11px] text-zinc-400 font-mono truncate">
                                 {peer.user_name} · {peer.platform}
                                 {#if sess.viewers && sess.viewers.length > 1}
                                   · {sess.viewers.length} connected
@@ -1262,7 +1266,7 @@
                                     sess.approved_mode || 'view',
                                     peer.user_name
                                   )}
-                                class="col-span-2 w-full sm:w-auto rounded-lg bg-cyan-600 px-3 py-2 sm:py-1.5 text-[11px] font-semibold text-white hover:bg-cyan-500 active:scale-[0.99] transition"
+                                class="col-span-2 w-full sm:w-auto rounded-lg bg-emerald-600 px-3 py-2 sm:py-1.5 text-[11px] font-semibold text-white hover:bg-emerald-500 active:scale-[0.99] transition"
                               >
                                 Rejoin ({sess.approved_mode === 'control' ? 'Control' : 'View'})
                               </button>
@@ -1271,7 +1275,7 @@
                                 type="button"
                                 disabled={Boolean(pendingOutboundRequestId)}
                                 onclick={() => handleRequestRemote(sess.session_id, sess.host_label, peer.user_name, 'view')}
-                                class="rounded-lg bg-[#1d2033] border border-indigo-500/30 px-2.5 py-2 sm:py-1.5 text-[11px] font-medium text-indigo-300 hover:bg-indigo-600/20 disabled:opacity-50"
+                                class="rounded-lg bg-white/[0.05] border border-white/[0.08] px-2.5 py-2 sm:py-1.5 text-[11px] font-medium text-zinc-200 hover:bg-white/[0.09] disabled:opacity-50"
                               >
                                 Request View
                               </button>
@@ -1430,7 +1434,6 @@
                       active={activeNav === 'terminal' && tab.id === terminalStore.activeTabId}
                       isFocusMode={platform.isPhone && isTerminalFocus}
                       onToggleFocus={platform.isPhone ? () => (isTerminalFocus = !isTerminalFocus) : undefined}
-                      onShareMultiplayer={() => (isMultiplayerOpen = true)}
                       onSplitRight={() => handleSplitTerminal('horizontal')}
                       onSplitDown={() => handleSplitTerminal('vertical')}
                     />
@@ -1448,7 +1451,6 @@
                     config={terminalStore.splitTab.config}
                     active={activeNav === 'terminal'}
                     isSplitPane={true}
-                    onShareMultiplayer={() => (isMultiplayerOpen = true)}
                     onClosePane={() => terminalStore.closeSplit()}
                   />
                 </div>
@@ -1600,7 +1602,7 @@
               />
             </div>
             <div class="pt-2 border-t border-[#20202c] flex items-center justify-between">
-              <span class="text-neutral-400 font-mono text-[11px]">OpenTermius v0.4.0</span>
+              <span class="text-neutral-400 font-mono text-[11px]">OpenTermius v0.4.1</span>
               <button
                 type="button"
                 onclick={handleSignOut}
@@ -1851,11 +1853,6 @@
     onSave={handleSaveHost}
   />
 
-  <MultiplayerModal
-    isOpen={isMultiplayerOpen}
-    onClose={() => (isMultiplayerOpen = false)}
-  />
-
   <ImportModal
     isOpen={isImportOpen}
     onClose={() => (isImportOpen = false)}
@@ -1914,9 +1911,5 @@
         </button>
       </div>
     </div>
-  {/if}
-
-  {#if showBootSplash}
-    <BootSplash onDone={() => (showBootSplash = false)} />
   {/if}
 </div>

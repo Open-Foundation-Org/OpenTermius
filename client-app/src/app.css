@@ -2,10 +2,10 @@
 
 @layer base {
   :root {
-    --bg-primary: #0a0a0c;
-    --bg-sidebar: #101014;
-    --bg-card: #15151a;
-    --border-subtle: #22222a;
+    --bg-primary: #09090b;
+    --bg-sidebar: #0e0e11;
+    --bg-card: #131317;
+    --border-subtle: rgba(255, 255, 255, 0.07);
     --accent-emerald: #10b981;
     --sat: env(safe-area-inset-top, 0px);
     --sab: env(safe-area-inset-bottom, 0px);
@@ -19,8 +19,9 @@
     margin: 0;
     padding: 0;
     background-color: var(--bg-primary);
-    color: #e2e8f0;
-    font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    color: #f4f4f5;
+    font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
     user-select: none;
     -webkit-user-select: none;
     -webkit-touch-callout: none;
@@ -28,6 +29,11 @@
     overscroll-behavior: none;
     overflow: hidden;
     box-sizing: border-box;
+  }
+
+  code, pre, .font-mono {
+    font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-variant-numeric: tabular-nums;
   }
 
   body {
@@ -54,16 +60,16 @@
 
 /* Custom terminal scrollbars */
 ::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+  width: 5px;
+  height: 5px;
 }
 ::-webkit-scrollbar-track {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: #2a2a35;
-  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.12);
+  border-radius: 999px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #3e3e4e;
+  background: rgba(255, 255, 255, 0.22);
 }
