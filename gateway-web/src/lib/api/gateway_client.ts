@@ -55,6 +55,20 @@ export interface GatewayPresence {
   active_sessions: GatewayActiveSession[];
 }
 
+function resolveDefaultApiBase(): string {
+  const envBase = (import.meta as any).env?.VITE_API_BASE as string | undefined;
+  if (envBase && envBase.trim()) {
+    return envBase.trim().replace(/\/+$/, '');
+  }
+  if (typeof window !== 'undefined') {
+    const { protocol, hostname } = window.location;
+    if (hostname) {
+      return `${protocol}//${hostname}:8080/api/v1`;
+    }
+  }
+  return 'http://localhost:8080/api/v1';
+}
+
 class GatewayApiClient {
   private apiBase: string = 'http://localhost:8080/api/v1';
   private token: string | null = null;
@@ -62,7 +76,9 @@ class GatewayApiClient {
   constructor() {
     if (typeof window !== 'undefined') {
       this.token = localStorage.getItem('gateway_admin_token');
-      this.apiBase = localStorage.getItem('gateway_admin_api_base') || 'http://localhost:8080/api/v1';
+      this.apiBase = localStorage.getItem('gateway_admin_api_base') || resolveDefaultApiBase();
+    } else {
+      this.apiBase = resolveDefaultApiBase();
     }
   }
 

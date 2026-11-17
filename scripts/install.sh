@@ -480,7 +480,13 @@ build_components() {
   ok "Built $INSTALL_DIR/backend/bin/server"
 
   log "Installing & building Gateway Web UI..."
-  (cd "$INSTALL_DIR/gateway-web" && (npm ci --no-audit --no-fund 2>/dev/null || npm install --no-audit --no-fund) && npm run build)
+  (
+    cd "$INSTALL_DIR/gateway-web"
+    if [ -n "${VITE_API_BASE:-}" ]; then
+      export VITE_API_BASE
+    fi
+    (npm ci --no-audit --no-fund 2>/dev/null || npm install --no-audit --no-fund) && npm run build
+  )
   ok "Built $INSTALL_DIR/gateway-web/dist"
 }
 
