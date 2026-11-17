@@ -537,7 +537,11 @@ setup_services() {
   local web_port="${WEB_PORT:-5174}"
 
   if [ "$PLATFORM" != "macos" ] && command -v systemctl >/dev/null 2>&1 && [ -d /run/systemd/system ]; then
-    local run_user="${SUDO_USER:-$USER}"
+    local run_user
+    run_user="$(stat -c '%U' "$INSTALL_DIR" 2>/dev/null || echo "${SUDO_USER:-$(id -un)}")"
+    if [[ "$INSTALL_DIR" == /root* ]]; then
+      run_user="root"
+    fi
     local node_bin
     node_bin="$(command -v npx)"
 
