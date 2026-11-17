@@ -617,6 +617,15 @@
     term.loadAddon(fitAddon);
     term.open(terminalContainer);
 
+    if (term.textarea) {
+      term.textarea.setAttribute('autocomplete', 'off');
+      term.textarea.setAttribute('autocorrect', 'off');
+      term.textarea.setAttribute('autocapitalize', 'none');
+      term.textarea.setAttribute('spellcheck', 'false');
+      term.textarea.setAttribute('data-gramm', 'false');
+      term.textarea.setAttribute('enterkeyhint', 'send');
+    }
+
     setTimeout(() => {
       try {
         fitAddon?.fit();
