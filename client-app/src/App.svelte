@@ -954,6 +954,8 @@
     <!-- Dynamic Screen Content -->
     <div class="flex-1 min-h-0 overflow-hidden bg-[#0a0a0c]">
       {#if !isAuthenticated}
+        <!-- Top macOS drag region on auth/mode screen -->
+        <div data-tauri-drag-region class="fixed top-0 left-0 right-0 h-8 z-40"></div>
         <!-- Initial Setup / Connection Mode Screen -->
         <div class="flex h-full items-center justify-center p-6 overflow-y-auto">
           {#if connectionChoice === 'select'}
