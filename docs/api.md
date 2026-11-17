@@ -126,10 +126,10 @@ This document serves as the single source of truth for all OpenTermius Gateway R
 | Method | Endpoint | Description |
 | :--- | :--- | :--- |
 | `POST` | `/api/v1/presence/heartbeat` | Report device online status & active native SSH sessions; returns pending remote requests |
-| `GET` | `/api/v1/presence?vault_id=...` | List online devices & active SSH sessions (optionally scoped to a Team Vault) |
-| `POST` | `/api/v1/sessions/:sessionId/request` | Request remote view/control access to a teammate's active SSH session |
+| `GET` | `/api/v1/presence?vault_id=...` | List online devices, active SSH sessions, connected relay avatars (`viewers`), and caller's reusable `approved_request_id` |
+| `POST` | `/api/v1/sessions/:sessionId/request` | Request remote view/control access (auto-reuses existing approval for the same session/user) |
 | `GET` | `/api/v1/sessions/requests/:requestId` | Poll approval status of an outbound remote access request |
 | `POST` | `/api/v1/sessions/requests/:requestId/respond` | Approve (`view` or `control`) or reject an incoming remote access request |
-| `GET` | `/api/v1/relay/:sessionId?token=...&role=host\|viewer&request_id=...` | WebSocket Binary Relay forwarding PTY frames between client `russh` host & approved viewers |
+| `GET` | `/api/v1/relay/:sessionId?token=...&role=host\|viewer&request_id=...` | WebSocket Binary Relay forwarding PTY frames + `relay_state` participant avatars & throttled `typing` indicators |
 
 

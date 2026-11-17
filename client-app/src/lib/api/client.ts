@@ -59,12 +59,21 @@ export interface SftpHostConfig {
   passphrase?: string;
 }
 
+export interface RelayParticipant {
+  user_id: string;
+  user_name: string;
+  mode: 'host' | 'control' | 'view';
+}
+
 export interface ActiveSessionInfo {
   session_id: string;
   vault_id: string;
   vault_name: string;
   host_label: string;
   started_at: string;
+  approved_request_id?: string;
+  approved_mode?: 'view' | 'control';
+  viewers?: RelayParticipant[];
 }
 
 export interface DevicePresence {

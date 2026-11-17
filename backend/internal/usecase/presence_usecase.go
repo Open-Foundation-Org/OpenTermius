@@ -10,12 +10,21 @@ import (
 	"github.com/opentermius/opentermius/internal/ports"
 )
 
+type RelayParticipant struct {
+	UserID   string `json:"user_id"`
+	UserName string `json:"user_name"`
+	Mode     string `json:"mode"` // "host" | "control" | "view"
+}
+
 type ActiveSessionInfo struct {
-	SessionID string    `json:"session_id"`
-	VaultID   string    `json:"vault_id"`
-	VaultName string    `json:"vault_name"`
-	HostLabel string    `json:"host_label"`
-	StartedAt time.Time `json:"started_at"`
+	SessionID         string             `json:"session_id"`
+	VaultID           string             `json:"vault_id"`
+	VaultName         string             `json:"vault_name"`
+	HostLabel         string             `json:"host_label"`
+	StartedAt         time.Time          `json:"started_at"`
+	ApprovedRequestID string             `json:"approved_request_id,omitempty"`
+	ApprovedMode      string             `json:"approved_mode,omitempty"`
+	Viewers           []RelayParticipant `json:"viewers,omitempty"`
 }
 
 type DevicePresence struct {
@@ -45,20 +54,42 @@ type RemoteRequest struct {
 }
 
 type PresenceUseCase struct {
-	mu        sync.RWMutex
-	devices   map[string]*DevicePresence // key: userID:deviceID
-	requests  map[string]*RemoteRequest  // key: requestID
-	vaultRepo ports.VaultRepository
-	userRepo  ports.UserRepository
+	mu             sync.RWMutex
+	devices        map[string]*DevicePresence    // key: userID:deviceID
+	requests       map[string]*RemoteRequest     // key: requestID
+	sessionViewers map[string][]RelayParticipant // key: sessionID
+	vaultRepo      ports.VaultRepository
+	userRepo       ports.UserRepository
 }
 
 func NewPresenceUseCase(vaultRepo ports.VaultRepository, userRepo ports.UserRepository) *PresenceUseCase {
 	return &PresenceUseCase{
-		devices:   make(map[string]*DevicePresence),
-		requests:  make(map[string]*RemoteRequest),
-		vaultRepo: vaultRepo,
-		userRepo:  userRepo,
+		devices:        make(map[string]*DevicePresence),
+		requests:       make(map[string]*RemoteRequest),
+		sessionViewers: make(map[string][]RelayParticipant),
+		vaultRepo:      vaultRepo,
+		userRepo:       userRepo,
 	}
+}
+
+func (p *PresenceUseCase) SetSessionViewers(sessionID string, viewers []RelayParticipant) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if len(viewers) == 0 {
+		delete(p.sessionViewers, sessionID)
+		return
+	}
+	cp := make([]RelayParticipant, len(viewers))
+	copy(cp, viewers)
+	p.sessionViewers[sessionID] = cp
+}
+
+func (p *PresenceUseCase) GetUserName(ctx context.Context, userID uuid.UUID) string {
+	user, err := p.userRepo.GetByID(ctx, userID)
+	if err == nil && user != nil && user.Name != "" {
+		return user.Name
+	}
+	return "Operator"
 }
 
 func (p *PresenceUseCase) Heartbeat(
@@ -148,17 +179,30 @@ func (p *PresenceUseCase) ListPresence(ctx context.Context, callerID uuid.UUID, 
 		copyDev.Online = isOnline
 		if !isOnline {
 			copyDev.ActiveSessions = []ActiveSessionInfo{}
-		} else if vaultIDFilter != "" {
-			var filtered []ActiveSessionInfo
+		} else {
+			var enriched []ActiveSessionInfo
 			for _, s := range d.ActiveSessions {
-				if s.VaultID == vaultIDFilter {
-					filtered = append(filtered, s)
+				if vaultIDFilter != "" && s.VaultID != vaultIDFilter {
+					continue
 				}
+				if viewers, ok := p.sessionViewers[s.SessionID]; ok && len(viewers) > 0 {
+					s.Viewers = append([]RelayParticipant(nil), viewers...)
+				}
+				for _, req := range p.requests {
+					if req.SessionID == s.SessionID && req.RequesterID == callerID && req.Status == "approved" {
+						s.ApprovedRequestID = req.ID
+						s.ApprovedMode = req.Mode
+						if req.Mode == "control" {
+							break
+						}
+					}
+				}
+				enriched = append(enriched, s)
 			}
-			if filtered == nil {
-				filtered = []ActiveSessionInfo{}
+			if enriched == nil {
+				enriched = []ActiveSessionInfo{}
 			}
-			copyDev.ActiveSessions = filtered
+			copyDev.ActiveSessions = enriched
 		}
 		out = append(out, copyDev)
 	}
@@ -209,6 +253,19 @@ func (p *PresenceUseCase) RequestRemote(ctx context.Context, requesterID uuid.UU
 	} else if ownerID != requesterID {
 		return nil, domain.ErrForbidden
 	}
+
+	// Reuse already-approved access for this session+user so they don't wait again
+	p.mu.RLock()
+	for _, existing := range p.requests {
+		if existing.SessionID == sessionID && existing.RequesterID == requesterID && existing.Status == "approved" {
+			if existing.Mode == "control" || existing.Mode == mode {
+				copyReq := *existing
+				p.mu.RUnlock()
+				return &copyReq, nil
+			}
+		}
+	}
+	p.mu.RUnlock()
 
 	reqUser, err := p.userRepo.GetByID(ctx, requesterID)
 	reqName := "Teammate"

@@ -525,6 +525,54 @@
     }
   }
 
+  function getAvatarInitials(name: string): string {
+    const parts = (name || '?').trim().split(/\s+/);
+    if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
+    return (parts[0]?.slice(0, 2) || '?').toUpperCase();
+  }
+
+  function getAvatarTone(seed: string): string {
+    const tones = [
+      'bg-emerald-600 text-white',
+      'bg-indigo-600 text-white',
+      'bg-cyan-600 text-white',
+      'bg-amber-600 text-white',
+      'bg-rose-600 text-white',
+      'bg-violet-600 text-white'
+    ];
+    let hash = 0;
+    for (let i = 0; i < seed.length; i++) {
+      hash = (hash * 31 + seed.charCodeAt(i)) | 0;
+    }
+    return tones[Math.abs(hash) % tones.length];
+  }
+
+  function handleRejoinRemote(
+    sessionId: string,
+    vaultId: string,
+    hostLabel: string,
+    requestId: string,
+    mode: 'view' | 'control',
+    ownerName: string
+  ) {
+    terminalStore.openTab(
+      `remote-${sessionId}`,
+      `${hostLabel} (${mode})`,
+      undefined,
+      {
+        vaultId,
+        remoteConfig: {
+          sessionId,
+          requestId,
+          mode,
+          ownerName
+        }
+      }
+    );
+    activeNav = 'terminal';
+    toast.success(`Rejoined ${hostLabel} (${mode})`);
+  }
+
   async function handleRequestRemote(sessionId: string, hostLabel: string, ownerName: string, mode: 'view' | 'control') {
     try {
       const req = await api.requestRemoteSession(sessionId, mode);
@@ -1163,29 +1211,71 @@
                     {#each activeTeamPeers as peer (peer.user_id + peer.device_id)}
                       {#each peer.active_sessions as sess (sess.session_id)}
                         <div class="flex flex-wrap items-center justify-between gap-2 rounded-xl bg-[#11121c] border border-[#232538] px-3 py-2 text-xs">
-                          <div class="min-w-0">
-                            <p class="font-semibold text-white truncate">{sess.host_label}</p>
-                            <p class="text-[11px] text-neutral-400 truncate">
-                              {peer.user_name} · {peer.platform}
-                            </p>
+                          <div class="flex items-center gap-2.5 min-w-0">
+                            <div class="flex -space-x-1.5 shrink-0">
+                              {#if sess.viewers && sess.viewers.length > 0}
+                                {#each sess.viewers as v (v.user_id + v.mode)}
+                                  <span
+                                    title="{v.user_name} ({v.mode === 'host' ? 'Host' : v.mode === 'control' ? 'Control' : 'View'})"
+                                    class="inline-flex h-6 w-6 items-center justify-center rounded-full text-[10px] font-bold ring-2 ring-[#11121c] {getAvatarTone(v.user_id || v.user_name)}"
+                                  >
+                                    {getAvatarInitials(v.user_name)}
+                                  </span>
+                                {/each}
+                              {:else}
+                                <span
+                                  title="{peer.user_name} (Host)"
+                                  class="inline-flex h-6 w-6 items-center justify-center rounded-full text-[10px] font-bold ring-2 ring-[#11121c] {getAvatarTone(peer.user_id || peer.user_name)}"
+                                >
+                                  {getAvatarInitials(peer.user_name)}
+                                </span>
+                              {/if}
+                            </div>
+                            <div class="min-w-0">
+                              <p class="font-semibold text-white truncate">{sess.host_label}</p>
+                              <p class="text-[11px] text-neutral-400 truncate">
+                                {peer.user_name} · {peer.platform}
+                                {#if sess.viewers && sess.viewers.length > 1}
+                                  · {sess.viewers.length} connected
+                                {/if}
+                              </p>
+                            </div>
                           </div>
                           <div class="flex items-center gap-1.5 shrink-0">
-                            <button
-                              type="button"
-                              disabled={Boolean(pendingOutboundRequestId)}
-                              onclick={() => handleRequestRemote(sess.session_id, sess.host_label, peer.user_name, 'view')}
-                              class="rounded-lg bg-[#1d2033] border border-indigo-500/30 px-2.5 py-1.5 text-[11px] font-medium text-indigo-300 hover:bg-indigo-600/20 disabled:opacity-50"
-                            >
-                              Request View
-                            </button>
-                            <button
-                              type="button"
-                              disabled={Boolean(pendingOutboundRequestId)}
-                              onclick={() => handleRequestRemote(sess.session_id, sess.host_label, peer.user_name, 'control')}
-                              class="rounded-lg bg-emerald-600 px-2.5 py-1.5 text-[11px] font-semibold text-white hover:bg-emerald-500 disabled:opacity-50"
-                            >
-                              Request Control
-                            </button>
+                            {#if sess.approved_request_id}
+                              <button
+                                type="button"
+                                onclick={() =>
+                                  handleRejoinRemote(
+                                    sess.session_id,
+                                    sess.vault_id,
+                                    sess.host_label,
+                                    sess.approved_request_id!,
+                                    sess.approved_mode || 'view',
+                                    peer.user_name
+                                  )}
+                                class="rounded-lg bg-cyan-600 px-2.5 py-1.5 text-[11px] font-semibold text-white hover:bg-cyan-500"
+                              >
+                                Rejoin ({sess.approved_mode === 'control' ? 'Control' : 'View'})
+                              </button>
+                            {:else}
+                              <button
+                                type="button"
+                                disabled={Boolean(pendingOutboundRequestId)}
+                                onclick={() => handleRequestRemote(sess.session_id, sess.host_label, peer.user_name, 'view')}
+                                class="rounded-lg bg-[#1d2033] border border-indigo-500/30 px-2.5 py-1.5 text-[11px] font-medium text-indigo-300 hover:bg-indigo-600/20 disabled:opacity-50"
+                              >
+                                Request View
+                              </button>
+                              <button
+                                type="button"
+                                disabled={Boolean(pendingOutboundRequestId)}
+                                onclick={() => handleRequestRemote(sess.session_id, sess.host_label, peer.user_name, 'control')}
+                                class="rounded-lg bg-emerald-600 px-2.5 py-1.5 text-[11px] font-semibold text-white hover:bg-emerald-500 disabled:opacity-50"
+                              >
+                                Request Control
+                              </button>
+                            {/if}
                           </div>
                         </div>
                       {/each}

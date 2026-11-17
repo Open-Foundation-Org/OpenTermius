@@ -3,7 +3,7 @@
   import { Terminal } from '@xterm/xterm';
   import { FitAddon } from '@xterm/addon-fit';
   import type { TerminalHostConfig, RemoteViewerConfig } from '../stores/terminal.svelte';
-  import { api } from '../api/client';
+  import { api, type RelayParticipant } from '../api/client';
   import { platform } from '../stores/platform.svelte';
   import { toast, formatErrorMessage } from '../stores/toast.svelte';
   import {
@@ -87,9 +87,57 @@
   let relayWs: WebSocket | null = null;
   let isRelaySharing = $state(false);
   let relayViewerCount = $state(0);
+  let relayParticipants = $state<RelayParticipant[]>([]);
+  let typingUsers = $state<Array<{ user_id: string; user_name: string }>>([]);
+  const typingTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  let lastHostTypingSent = 0;
   const relayEncoder = new TextEncoder();
   const relayDecoder = new TextDecoder();
   let sessionStartMs = 0;
+
+  function getInitials(name: string): string {
+    const parts = (name || '?').trim().split(/\s+/);
+    if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
+    return (parts[0]?.slice(0, 2) || '?').toUpperCase();
+  }
+
+  function getAvatarTone(seed: string): string {
+    const tones = ['bg-emerald-600', 'bg-indigo-600', 'bg-cyan-600', 'bg-amber-600', 'bg-rose-600', 'bg-violet-600'];
+    let h = 0;
+    for (let i = 0; i < seed.length; i++) h = (h * 31 + seed.charCodeAt(i)) | 0;
+    return tones[Math.abs(h) % tones.length];
+  }
+
+  function handleRelayControlMessage(raw: string): boolean {
+    try {
+      const msg = JSON.parse(raw);
+      if (msg.type === 'relay_state' || msg.type === 'viewer_count') {
+        relayViewerCount = Number(msg.count) || 0;
+        if (Array.isArray(msg.viewers)) {
+          relayParticipants = msg.viewers;
+        }
+        return true;
+      }
+      if (msg.type === 'typing' && msg.user_id && msg.user_name) {
+        const uid = String(msg.user_id);
+        const uname = String(msg.user_name);
+        if (!typingUsers.some((u) => u.user_id === uid)) {
+          typingUsers = [...typingUsers, { user_id: uid, user_name: uname }];
+        }
+        const prev = typingTimers.get(uid);
+        if (prev) clearTimeout(prev);
+        typingTimers.set(
+          uid,
+          setTimeout(() => {
+            typingTimers.delete(uid);
+            typingUsers = typingUsers.filter((u) => u.user_id !== uid);
+          }, 1800)
+        );
+        return true;
+      }
+    } catch {}
+    return false;
+  }
 
   function stopRelay() {
     if (relayWs) {
@@ -98,6 +146,8 @@
     }
     isRelaySharing = false;
     relayViewerCount = 0;
+    relayParticipants = [];
+    typingUsers = [];
   }
 
   function startHostRelay() {
@@ -111,22 +161,23 @@
     };
     ws.onmessage = (ev) => {
       if (typeof ev.data === 'string') {
-        try {
-          const msg = JSON.parse(ev.data);
-          if (msg.type === 'viewer_count') {
-            relayViewerCount = Number(msg.count) || 0;
-          }
-        } catch {}
+        handleRelayControlMessage(ev.data);
         return;
       }
       if (ev.data instanceof ArrayBuffer) {
         const text = relayDecoder.decode(new Uint8Array(ev.data));
-        if (text) sendTerminalInput(text);
+        if (text) {
+          import('@tauri-apps/api/core').then(({ invoke }) => {
+            invoke('terminal_write', { sessionId: activeSessionId, data: text }).catch(() => {});
+          });
+        }
       }
     };
     ws.onclose = () => {
       isRelaySharing = false;
       relayViewerCount = 0;
+      relayParticipants = [];
+      typingUsers = [];
       relayWs = null;
     };
     relayWs = ws;
@@ -143,12 +194,15 @@
     ws.binaryType = 'arraybuffer';
     ws.onopen = () => {
       connectionState = 'connected';
+      setTimeout(() => term?.focus(), 50);
     };
     ws.onmessage = (ev) => {
       if (ev.data instanceof ArrayBuffer) {
         term?.write(relayDecoder.decode(new Uint8Array(ev.data)));
       } else if (typeof ev.data === 'string') {
-        term?.write(ev.data);
+        if (!handleRelayControlMessage(ev.data)) {
+          term?.write(ev.data);
+        }
       }
     };
     ws.onerror = () => {
@@ -156,6 +210,8 @@
       errorMessage = 'Relay WebSocket connection failed';
     };
     ws.onclose = () => {
+      relayParticipants = [];
+      typingUsers = [];
       if (connectionState !== 'error') {
         connectionState = 'disconnected';
         term?.writeln('\r\n\x1b[1;33mRemote relay closed.\x1b[0m\r\n');
@@ -403,6 +459,13 @@
         relayWs.send(relayEncoder.encode(data));
       }
       return;
+    }
+    if (isRelaySharing && relayWs?.readyState === WebSocket.OPEN) {
+      const now = Date.now();
+      if (now - lastHostTypingSent > 700) {
+        lastHostTypingSent = now;
+        relayWs.send(JSON.stringify({ type: 'typing' }));
+      }
     }
     import('@tauri-apps/api/core').then(({ invoke }) => {
       invoke('terminal_write', { sessionId: activeSessionId, data }).catch(() => {});
@@ -756,6 +819,18 @@
         <Trash2 class="h-3.5 w-3.5" />
       </button>
 
+      {#if relayParticipants.length > 0}
+        <div class="flex -space-x-1.5 mr-1">
+          {#each relayParticipants as p (p.user_id + p.mode)}
+            <span
+              title="{p.user_name} ({p.mode === 'host' ? 'Host' : p.mode === 'control' ? 'Control' : 'View'})"
+              class="inline-flex h-5 w-5 items-center justify-center rounded-full text-[9px] font-bold text-white ring-2 ring-[#11111a] {getAvatarTone(p.user_id || p.user_name)}"
+            >
+              {getInitials(p.user_name)}
+            </span>
+          {/each}
+        </div>
+      {/if}
       {#if remoteConfig}
         <span class="rounded-full bg-indigo-500/20 border border-indigo-500/30 px-2.5 py-0.5 text-[10px] font-semibold text-indigo-300">
           {remoteConfig.mode === 'control' ? 'Remote Control' : 'View-Only'}
@@ -909,6 +984,17 @@
     {/if}
 
     <div bind:this={terminalContainer} class="h-full w-full"></div>
+
+    {#if typingUsers.length > 0}
+      <div class="pointer-events-none absolute top-2.5 right-3 z-25 flex items-center gap-1.5 rounded-full border border-emerald-500/40 bg-[#12131f]/90 px-2.5 py-1 text-[11px] font-medium text-emerald-300 shadow-lg backdrop-blur-sm">
+        <span class="inline-flex h-4 w-4 items-center justify-center rounded-full text-[8px] font-bold text-white {getAvatarTone(typingUsers[0].user_id)}">
+          {getInitials(typingUsers[0].user_name)}
+        </span>
+        <span>
+          {typingUsers.map((u) => u.user_name).join(', ')} is typing...
+        </span>
+      </div>
+    {/if}
 
     {#if selectionMode}
       <!-- Transparent touch-none overlay: WebView never scrolls while dragging selection -->

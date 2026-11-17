@@ -15,9 +15,12 @@ import (
 )
 
 type relayPeer struct {
-	conn *websocket.Conn
-	mode string // "host" | "view" | "control"
-	mu   sync.Mutex
+	conn       *websocket.Conn
+	userID     string
+	userName   string
+	mode       string // "host" | "view" | "control"
+	lastTyping time.Time
+	mu         sync.Mutex
 }
 
 func (p *relayPeer) send(msgType int, data []byte) error {
@@ -225,13 +228,50 @@ func (h *CollabHandler) RelayWS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	userName := h.presenceUC.GetUserName(r.Context(), userID)
+
 	conn, err := h.upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		return
 	}
 
-	peer := &relayPeer{conn: conn, mode: mode}
+	peer := &relayPeer{conn: conn, userID: userID.String(), userName: userName, mode: mode}
 	room := h.getOrCreateRoom(sessionID)
+
+	broadcastState := func() {
+		room.mu.RLock()
+		hostPeer := room.host
+		participants := make([]usecase.RelayParticipant, 0, len(room.viewers)+1)
+		targets := make([]*relayPeer, 0, len(room.viewers)+1)
+		if hostPeer != nil {
+			participants = append(participants, usecase.RelayParticipant{
+				UserID:   hostPeer.userID,
+				UserName: hostPeer.userName,
+				Mode:     "host",
+			})
+			targets = append(targets, hostPeer)
+		}
+		for v := range room.viewers {
+			participants = append(participants, usecase.RelayParticipant{
+				UserID:   v.userID,
+				UserName: v.userName,
+				Mode:     v.mode,
+			})
+			targets = append(targets, v)
+		}
+		viewerCount := len(room.viewers)
+		room.mu.RUnlock()
+
+		h.presenceUC.SetSessionViewers(sessionID, participants)
+		ctrlMsg, _ := json.Marshal(map[string]any{
+			"type":    "relay_state",
+			"count":   viewerCount,
+			"viewers": participants,
+		})
+		for _, t := range targets {
+			_ = t.send(websocket.TextMessage, ctrlMsg)
+		}
+	}
 
 	if mode == "host" {
 		room.mu.Lock()
@@ -240,18 +280,12 @@ func (h *CollabHandler) RelayWS(w http.ResponseWriter, r *http.Request) {
 		}
 		room.host = peer
 		room.mu.Unlock()
+		broadcastState()
 	} else {
 		room.mu.Lock()
 		room.viewers[peer] = struct{}{}
-		hostPeer := room.host
-		viewerCount := len(room.viewers)
 		room.mu.Unlock()
-
-		// Notify host of updated viewer count
-		if hostPeer != nil {
-			ctrlMsg, _ := json.Marshal(map[string]any{"type": "viewer_count", "count": viewerCount})
-			_ = hostPeer.send(websocket.TextMessage, ctrlMsg)
-		}
+		broadcastState()
 	}
 
 	defer func() {
@@ -267,20 +301,49 @@ func (h *CollabHandler) RelayWS(w http.ResponseWriter, r *http.Request) {
 			room.viewers = make(map[*relayPeer]struct{})
 		} else {
 			delete(room.viewers, peer)
-			if room.host != nil {
-				ctrlMsg, _ := json.Marshal(map[string]any{"type": "viewer_count", "count": len(room.viewers)})
-				_ = room.host.send(websocket.TextMessage, ctrlMsg)
-			}
 		}
 		empty := room.host == nil && len(room.viewers) == 0
 		room.mu.Unlock()
 
 		if empty {
+			h.presenceUC.SetSessionViewers(sessionID, nil)
 			h.roomsMu.Lock()
 			delete(h.rooms, sessionID)
 			h.roomsMu.Unlock()
+		} else {
+			broadcastState()
 		}
 	}()
+
+	broadcastTyping := func(sender *relayPeer) {
+		now := time.Now()
+		if now.Sub(sender.lastTyping) < 700*time.Millisecond {
+			return
+		}
+		sender.lastTyping = now
+
+		typingMsg, _ := json.Marshal(map[string]any{
+			"type":      "typing",
+			"user_id":   sender.userID,
+			"user_name": sender.userName,
+		})
+
+		room.mu.RLock()
+		targets := make([]*relayPeer, 0, len(room.viewers)+1)
+		if room.host != nil && room.host != sender {
+			targets = append(targets, room.host)
+		}
+		for v := range room.viewers {
+			if v != sender {
+				targets = append(targets, v)
+			}
+		}
+		room.mu.RUnlock()
+
+		for _, t := range targets {
+			_ = t.send(websocket.TextMessage, typingMsg)
+		}
+	}
 
 	for {
 		msgType, payload, err := conn.ReadMessage()
@@ -289,6 +352,10 @@ func (h *CollabHandler) RelayWS(w http.ResponseWriter, r *http.Request) {
 		}
 
 		if mode == "host" {
+			if msgType == websocket.TextMessage {
+				broadcastTyping(peer)
+				continue
+			}
 			// Broadcast host PTY output frames to all approved viewers
 			room.mu.RLock()
 			viewers := make([]*relayPeer, 0, len(room.viewers))
@@ -301,6 +368,9 @@ func (h *CollabHandler) RelayWS(w http.ResponseWriter, r *http.Request) {
 				_ = v.send(msgType, payload)
 			}
 		} else if mode == "control" {
+			if msgType == websocket.BinaryMessage {
+				broadcastTyping(peer)
+			}
 			// Forward viewer input bytes to session host (dropped if mode == "view")
 			room.mu.RLock()
 			hostPeer := room.host
