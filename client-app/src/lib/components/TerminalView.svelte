@@ -16,7 +16,10 @@
     X,
     Keyboard,
     Copy,
-    ClipboardPaste
+    ClipboardPaste,
+    MoreVertical,
+    Maximize2,
+    Minimize2
   } from 'lucide-svelte';
 
   interface Props {
@@ -27,6 +30,8 @@
     remoteConfig?: RemoteViewerConfig;
     active?: boolean;
     isSplitPane?: boolean;
+    isFocusMode?: boolean;
+    onToggleFocus?: () => void;
     onShareMultiplayer: () => void;
     onSplitRight?: () => void;
     onSplitDown?: () => void;
@@ -41,6 +46,8 @@
     remoteConfig,
     active = true,
     isSplitPane = false,
+    isFocusMode = false,
+    onToggleFocus,
     onShareMultiplayer,
     onSplitRight,
     onSplitDown,
@@ -61,6 +68,7 @@
   let connectionState = $state<'connecting' | 'connected' | 'disconnected' | 'error'>('connecting');
   let errorMessage = $state<string | null>(null);
   let showAccessoryBar = $state(true);
+  let isMoreMenuOpen = $state(false);
   let dockTop = $state<boolean>(
     typeof window !== 'undefined' && localStorage.getItem('opentermius_keybar_dock') === 'top'
   );
@@ -774,10 +782,13 @@
 
 <div class="flex h-full min-h-0 flex-col bg-[#0a0a0c] overflow-hidden">
   <!-- Top Session Toolbar -->
-  <div class="flex h-10 shrink-0 items-center justify-between border-b border-[#1a1a24] bg-[#0d0d12] px-3 sm:px-4">
-    <div class="flex items-center gap-3">
-      <div class="flex items-center gap-2">
-        <span class="relative flex h-2 w-2">
+  <div
+    class="relative flex {platform.isPhone ? 'h-9 px-2' : 'h-10 px-3 sm:px-4'} shrink-0 items-center justify-between border-b border-[#1a1a24] bg-[#0d0d12]"
+    style={isFocusMode ? 'padding-top: env(safe-area-inset-top);' : ''}
+  >
+    <div class="flex items-center gap-2 min-w-0">
+      <div class="flex items-center gap-2 min-w-0">
+        <span class="relative flex h-2 w-2 shrink-0">
           {#if connectionState === 'connected'}
             <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
             <span class="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
@@ -788,11 +799,11 @@
             <span class="relative inline-flex rounded-full h-2 w-2 bg-rose-500"></span>
           {/if}
         </span>
-        <span class="text-xs font-semibold text-white tracking-wide">{title}</span>
+        <span class="text-xs font-semibold text-white tracking-wide truncate">{title}</span>
       </div>
     </div>
 
-    <div class="flex items-center gap-1.5">
+    <div class="flex items-center gap-1.5 shrink-0">
       {#if onSplitRight && !platform.isMobile}
         <button
           onclick={onSplitRight}
@@ -815,6 +826,22 @@
         </button>
       {/if}
 
+      {#if onToggleFocus && platform.isPhone}
+        <button
+          type="button"
+          onclick={onToggleFocus}
+          class="flex items-center justify-center rounded {btnTouch} text-xs transition {isFocusMode ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/30' : 'bg-[#181822] text-neutral-300 hover:text-white'}"
+          title={isFocusMode ? 'Show App Header' : 'Focus Terminal'}
+          aria-label={isFocusMode ? 'Show App Header' : 'Focus Terminal'}
+        >
+          {#if isFocusMode}
+            <Minimize2 class="h-3.5 w-3.5" />
+          {:else}
+            <Maximize2 class="h-3.5 w-3.5" />
+          {/if}
+        </button>
+      {/if}
+
       <button
         onclick={() => (showAccessoryBar = !showAccessoryBar)}
         class="flex items-center gap-1 rounded {btnTouch} text-xs transition {showAccessoryBar ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30' : 'bg-[#181822] text-neutral-400 hover:text-white'}"
@@ -824,23 +851,25 @@
         <Keyboard class="h-3.5 w-3.5" />
       </button>
 
-      <button
-        onclick={handleReconnect}
-        class="flex items-center gap-1 rounded bg-[#181822] {btnTouch} text-xs text-neutral-300 hover:text-white transition"
-        title="Reconnect"
-        aria-label="Reconnect"
-      >
-        <RefreshCw class="h-3.5 w-3.5" />
-      </button>
+      {#if !platform.isPhone}
+        <button
+          onclick={handleReconnect}
+          class="flex items-center gap-1 rounded bg-[#181822] {btnTouch} text-xs text-neutral-300 hover:text-white transition"
+          title="Reconnect"
+          aria-label="Reconnect"
+        >
+          <RefreshCw class="h-3.5 w-3.5" />
+        </button>
 
-      <button
-        onclick={handleClear}
-        class="flex items-center gap-1 rounded bg-[#181822] {btnTouch} text-xs text-neutral-300 hover:text-white transition"
-        title="Clear terminal"
-        aria-label="Clear terminal"
-      >
-        <Trash2 class="h-3.5 w-3.5" />
-      </button>
+        <button
+          onclick={handleClear}
+          class="flex items-center gap-1 rounded bg-[#181822] {btnTouch} text-xs text-neutral-300 hover:text-white transition"
+          title="Clear terminal"
+          aria-label="Clear terminal"
+        >
+          <Trash2 class="h-3.5 w-3.5" />
+        </button>
+      {/if}
 
       {#if relayParticipants.length > 0}
         <div class="flex -space-x-1.5 mr-1">
@@ -867,7 +896,7 @@
         >
           Sharing ({relayViewerCount}) ×
         </button>
-      {:else}
+      {:else if !platform.isPhone}
         <button
           onclick={onShareMultiplayer}
           class="flex items-center gap-1 rounded bg-emerald-600/20 border border-emerald-500/30 {btnTouch} text-xs font-semibold text-emerald-400 hover:bg-emerald-600/30 transition"
@@ -876,6 +905,58 @@
         >
           <Share2 class="h-3.5 w-3.5" />
         </button>
+      {/if}
+
+      {#if platform.isPhone}
+        <button
+          type="button"
+          onclick={() => (isMoreMenuOpen = !isMoreMenuOpen)}
+          class="flex items-center justify-center rounded bg-[#181822] {btnTouch} text-xs text-neutral-300 hover:text-white transition"
+          title="More terminal actions"
+          aria-label="More terminal actions"
+        >
+          <MoreVertical class="h-3.5 w-3.5" />
+        </button>
+        {#if isMoreMenuOpen}
+          <div class="fixed inset-0 z-30" role="presentation" onclick={() => (isMoreMenuOpen = false)}></div>
+          <div class="absolute right-2 top-10 z-40 w-44 rounded-xl border border-[#282838] bg-[#14141f] p-1.5 shadow-2xl space-y-1 text-xs">
+            <button
+              type="button"
+              onclick={() => {
+                isMoreMenuOpen = false;
+                handleReconnect();
+              }}
+              class="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-neutral-200 hover:bg-[#1e1e2e]"
+            >
+              <RefreshCw class="h-3.5 w-3.5 text-emerald-400" />
+              <span>Reconnect</span>
+            </button>
+            <button
+              type="button"
+              onclick={() => {
+                isMoreMenuOpen = false;
+                handleClear();
+              }}
+              class="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-neutral-200 hover:bg-[#1e1e2e]"
+            >
+              <Trash2 class="h-3.5 w-3.5 text-amber-400" />
+              <span>Clear Terminal</span>
+            </button>
+            {#if !remoteConfig && !isRelaySharing}
+              <button
+                type="button"
+                onclick={() => {
+                  isMoreMenuOpen = false;
+                  onShareMultiplayer();
+                }}
+                class="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-emerald-300 hover:bg-[#1e1e2e]"
+              >
+                <Share2 class="h-3.5 w-3.5" />
+                <span>Share Session</span>
+              </button>
+            {/if}
+          </div>
+        {/if}
       {/if}
 
       {#if isSplitPane && onClosePane}
@@ -914,7 +995,10 @@
           { k: 'PGDN', l: 'PGDN' }
         ]
       ]}
-      <div class="shrink-0 bg-[#0d0d13] {dockTop ? 'border-b' : 'border-t'} border-[#1f202c] px-1.5 py-1 space-y-1 select-none z-20">
+      <div
+        class="shrink-0 bg-[#0d0d13] {dockTop ? 'border-b' : 'border-t'} border-[#1f202c] px-1.5 py-1 space-y-1 select-none z-20"
+        style={!dockTop ? 'padding-bottom: max(0.25rem, env(safe-area-inset-bottom));' : ''}
+      >
         {#each termuxRows as row}
           <div class="grid grid-cols-7 gap-1">
             {#each row as key}

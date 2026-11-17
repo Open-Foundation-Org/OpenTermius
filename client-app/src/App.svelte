@@ -77,6 +77,7 @@
   let isMobileMenuOpen = $state(false);
   let isSessionSwitcherOpen = $state(false);
   let isVaultSwitcherOpen = $state(false);
+  let isTerminalFocus = $state(false);
   let showBootSplash = $state(true);
   let sftpSelectedHostId = $state('');
   let currentUserId = $state('');
@@ -752,7 +753,11 @@
       }}
       {@const isSubPage = ['vaults', 'keychain', 'identities', 'snippets', 'logs', 'settings'].includes(activeNav)}
       {@const activeTab = terminalStore.tabs.find((t) => t.active)}
-      <header class="flex h-14 items-center justify-between border-b border-[#1f1f2a] bg-[#0e0e13] px-3.5 shrink-0 select-none">
+      {#if !(activeNav === 'terminal' && isTerminalFocus)}
+      <header
+        class="flex min-h-14 items-center justify-between border-b border-[#1f1f2a] bg-[#0e0e13] px-3.5 shrink-0 select-none"
+        style="padding-top: env(safe-area-inset-top);"
+      >
         <div class="flex items-center gap-2 min-w-0 flex-1">
           {#if isSubPage}
             <button
@@ -828,6 +833,7 @@
           </button>
         </div>
       </header>
+      {/if}
     {:else}
       <header
         data-tauri-drag-region
@@ -1243,7 +1249,7 @@
                               </p>
                             </div>
                           </div>
-                          <div class="flex items-center gap-1.5 shrink-0">
+                          <div class="w-full sm:w-auto grid grid-cols-2 sm:flex items-center gap-1.5 shrink-0">
                             {#if sess.approved_request_id}
                               <button
                                 type="button"
@@ -1256,7 +1262,7 @@
                                     sess.approved_mode || 'view',
                                     peer.user_name
                                   )}
-                                class="rounded-lg bg-cyan-600 px-2.5 py-1.5 text-[11px] font-semibold text-white hover:bg-cyan-500"
+                                class="col-span-2 w-full sm:w-auto rounded-lg bg-cyan-600 px-3 py-2 sm:py-1.5 text-[11px] font-semibold text-white hover:bg-cyan-500 active:scale-[0.99] transition"
                               >
                                 Rejoin ({sess.approved_mode === 'control' ? 'Control' : 'View'})
                               </button>
@@ -1265,7 +1271,7 @@
                                 type="button"
                                 disabled={Boolean(pendingOutboundRequestId)}
                                 onclick={() => handleRequestRemote(sess.session_id, sess.host_label, peer.user_name, 'view')}
-                                class="rounded-lg bg-[#1d2033] border border-indigo-500/30 px-2.5 py-1.5 text-[11px] font-medium text-indigo-300 hover:bg-indigo-600/20 disabled:opacity-50"
+                                class="rounded-lg bg-[#1d2033] border border-indigo-500/30 px-2.5 py-2 sm:py-1.5 text-[11px] font-medium text-indigo-300 hover:bg-indigo-600/20 disabled:opacity-50"
                               >
                                 Request View
                               </button>
@@ -1273,7 +1279,7 @@
                                 type="button"
                                 disabled={Boolean(pendingOutboundRequestId)}
                                 onclick={() => handleRequestRemote(sess.session_id, sess.host_label, peer.user_name, 'control')}
-                                class="rounded-lg bg-emerald-600 px-2.5 py-1.5 text-[11px] font-semibold text-white hover:bg-emerald-500 disabled:opacity-50"
+                                class="rounded-lg bg-emerald-600 px-2.5 py-2 sm:py-1.5 text-[11px] font-semibold text-white hover:bg-emerald-500 disabled:opacity-50"
                               >
                                 Request Control
                               </button>
@@ -1422,6 +1428,8 @@
                       config={tab.config}
                       remoteConfig={tab.remoteConfig}
                       active={activeNav === 'terminal' && tab.id === terminalStore.activeTabId}
+                      isFocusMode={platform.isPhone && isTerminalFocus}
+                      onToggleFocus={platform.isPhone ? () => (isTerminalFocus = !isTerminalFocus) : undefined}
                       onShareMultiplayer={() => (isMultiplayerOpen = true)}
                       onSplitRight={() => handleSplitTerminal('horizontal')}
                       onSplitDown={() => handleSplitTerminal('vertical')}
