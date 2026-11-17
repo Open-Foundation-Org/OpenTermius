@@ -33,6 +33,10 @@ Install PostgreSQL, Go 1.24, Node.js, database migrations, Gateway API (`:8080`)
 ```bash
 curl -fsSL https://raw.githubusercontent.com/wisnu-w/OpenTermius/main/scripts/install.sh | bash
 ```
+If PostgreSQL is already running (native, Docker, or external), `install.sh` detects it and skips installing a duplicate server. To target an existing/external DB directly:
+```bash
+DATABASE_URL="postgres://user:pass@host:5432/opentermius?sslmode=disable" curl -fsSL https://raw.githubusercontent.com/wisnu-w/OpenTermius/main/scripts/install.sh | bash
+```
 
 ### 1. Configure Environment
 ```bash

@@ -127,6 +127,19 @@ install_node_linux() {
   ok "Node.js $(node -v) installed"
 }
 
+postgres_already_running() {
+  if [ -n "${DATABASE_URL:-}" ]; then
+    return 0
+  fi
+  if command -v pg_isready >/dev/null 2>&1 && pg_isready -q 2>/dev/null; then
+    return 0
+  fi
+  if (echo >/dev/tcp/127.0.0.1/"${PGPORT:-5432}") 2>/dev/null; then
+    return 0
+  fi
+  return 1
+}
+
 install_deps_macos() {
   if ! command -v brew >/dev/null 2>&1; then
     log "Installing Homebrew..."
@@ -134,70 +147,106 @@ install_deps_macos() {
     eval "$(/opt/homebrew/bin/brew shellenv 2>/dev/null || /usr/local/bin/brew shellenv 2>/dev/null || true)"
   fi
 
-  log "Installing PostgreSQL, Go, Node.js, git, openssl via Homebrew..."
-  brew install postgresql@16 go node git openssl@3
-  brew services start postgresql@16 || true
+  log "Installing Go, Node.js, git, openssl via Homebrew..."
+  brew install go node git openssl@3
 
-  local pg_bin
-  pg_bin="$(brew --prefix postgresql@16)/bin"
-  export PATH="$pg_bin:$PATH"
-  if ! grep -q "$pg_bin" "$HOME/.zshrc" 2>/dev/null; then
-    echo "export PATH=\"$pg_bin:\$PATH\"" >> "$HOME/.zshrc"
+  if postgres_already_running; then
+    ok "Existing PostgreSQL detected on port ${PGPORT:-5432} (skipping postgresql@16 install/start)"
+    if ! command -v psql >/dev/null 2>&1; then
+      brew install libpq
+      export PATH="$(brew --prefix libpq)/bin:$PATH"
+    fi
+  elif command -v psql >/dev/null 2>&1; then
+    ok "PostgreSQL client already installed: $(psql --version)"
+  else
+    log "Installing PostgreSQL@16 via Homebrew..."
+    brew install postgresql@16
+    brew services start postgresql@16 || true
+    local pg_bin
+    pg_bin="$(brew --prefix postgresql@16)/bin"
+    export PATH="$pg_bin:$PATH"
+    if ! grep -q "$pg_bin" "$HOME/.zshrc" 2>/dev/null; then
+      echo "export PATH=\"$pg_bin:\$PATH\"" >> "$HOME/.zshrc"
+    fi
   fi
   ok "macOS dependencies ready"
 }
 
 install_deps_linux() {
+  local has_pg=0
+  if postgres_already_running; then
+    has_pg=1
+    ok "Existing PostgreSQL detected (skipping server install/initdb)"
+  fi
+
   case "$PLATFORM" in
     debian)
-      log "Updating apt & installing base packages + PostgreSQL..."
+      log "Updating apt & installing base packages..."
       as_root apt-get update -y
-      as_root apt-get install -y curl git build-essential openssl ca-certificates postgresql postgresql-contrib
-      if command -v systemctl >/dev/null 2>&1 && [ -d /run/systemd/system ]; then
-        as_root systemctl enable --now postgresql
+      if [ "$has_pg" -eq 1 ]; then
+        as_root apt-get install -y curl git build-essential openssl ca-certificates postgresql-client
       else
-        as_root service postgresql start || true
+        as_root apt-get install -y curl git build-essential openssl ca-certificates postgresql postgresql-contrib
+        if command -v systemctl >/dev/null 2>&1 && [ -d /run/systemd/system ]; then
+          as_root systemctl enable --now postgresql
+        else
+          as_root service postgresql start || true
+        fi
       fi
       ;;
     fedora)
-      log "Installing base packages + PostgreSQL via dnf..."
-      as_root dnf install -y curl git gcc make openssl ca-certificates postgresql-server postgresql-contrib
-      if [ ! -f /var/lib/pgsql/data/PG_VERSION ]; then
-        as_root postgresql-setup --initdb
-      fi
-      if command -v systemctl >/dev/null 2>&1 && [ -d /run/systemd/system ]; then
-        as_root systemctl enable --now postgresql
+      log "Installing base packages via dnf..."
+      if [ "$has_pg" -eq 1 ]; then
+        as_root dnf install -y curl git gcc make openssl ca-certificates postgresql
+      else
+        as_root dnf install -y curl git gcc make openssl ca-certificates postgresql-server postgresql-contrib
+        if [ ! -f /var/lib/pgsql/data/PG_VERSION ]; then
+          as_root postgresql-setup --initdb
+        fi
+        if command -v systemctl >/dev/null 2>&1 && [ -d /run/systemd/system ]; then
+          as_root systemctl enable --now postgresql
+        fi
       fi
       ;;
     rhel)
-      log "Installing base packages + PostgreSQL via yum..."
-      as_root yum install -y curl git gcc make openssl ca-certificates postgresql-server postgresql-contrib
-      if [ ! -f /var/lib/pgsql/data/PG_VERSION ]; then
-        as_root postgresql-setup initdb || as_root postgresql-setup --initdb
-      fi
-      if command -v systemctl >/dev/null 2>&1 && [ -d /run/systemd/system ]; then
-        as_root systemctl enable --now postgresql
+      log "Installing base packages via yum..."
+      if [ "$has_pg" -eq 1 ]; then
+        as_root yum install -y curl git gcc make openssl ca-certificates postgresql
+      else
+        as_root yum install -y curl git gcc make openssl ca-certificates postgresql-server postgresql-contrib
+        if [ ! -f /var/lib/pgsql/data/PG_VERSION ]; then
+          as_root postgresql-setup initdb || as_root postgresql-setup --initdb
+        fi
+        if command -v systemctl >/dev/null 2>&1 && [ -d /run/systemd/system ]; then
+          as_root systemctl enable --now postgresql
+        fi
       fi
       ;;
     arch)
-      log "Installing base packages + PostgreSQL via pacman..."
+      log "Installing base packages via pacman..."
       as_root pacman -Sy --noconfirm --needed curl git base-devel openssl ca-certificates postgresql
-      if [ ! -f /var/lib/postgres/data/PG_VERSION ]; then
-        as_root -u postgres initdb -D /var/lib/postgres/data
-      fi
-      if command -v systemctl >/dev/null 2>&1 && [ -d /run/systemd/system ]; then
-        as_root systemctl enable --now postgresql
+      if [ "$has_pg" -eq 0 ]; then
+        if [ ! -f /var/lib/postgres/data/PG_VERSION ]; then
+          as_root -u postgres initdb -D /var/lib/postgres/data
+        fi
+        if command -v systemctl >/dev/null 2>&1 && [ -d /run/systemd/system ]; then
+          as_root systemctl enable --now postgresql
+        fi
       fi
       ;;
     alpine)
-      log "Installing base packages + PostgreSQL via apk..."
-      as_root apk add --no-cache bash curl git build-base openssl ca-certificates postgresql postgresql-contrib
-      if [ ! -f /var/lib/postgresql/data/PG_VERSION ]; then
-        as_root mkdir -p /var/lib/postgresql/data /run/postgresql
-        as_root chown -R postgres:postgres /var/lib/postgresql /run/postgresql
-        as_root su - postgres -c "initdb -D /var/lib/postgresql/data"
+      log "Installing base packages via apk..."
+      if [ "$has_pg" -eq 1 ]; then
+        as_root apk add --no-cache bash curl git build-base openssl ca-certificates postgresql-client
+      else
+        as_root apk add --no-cache bash curl git build-base openssl ca-certificates postgresql postgresql-contrib
+        if [ ! -f /var/lib/postgresql/data/PG_VERSION ]; then
+          as_root mkdir -p /var/lib/postgresql/data /run/postgresql
+          as_root chown -R postgres:postgres /var/lib/postgresql /run/postgresql
+          as_root su - postgres -c "initdb -D /var/lib/postgresql/data"
+        fi
+        as_root rc-service postgresql start 2>/dev/null || as_root su - postgres -c "pg_ctl -D /var/lib/postgresql/data start" || true
       fi
-      as_root rc-service postgresql start 2>/dev/null || as_root su - postgres -c "pg_ctl -D /var/lib/postgresql/data start" || true
       ;;
   esac
 
@@ -222,18 +271,11 @@ clone_or_update_repo() {
   fi
 }
 
-run_psql_admin() {
-  if [ "$PLATFORM" = "macos" ]; then
-    psql -d postgres "$@"
-  else
-    as_root su - postgres -c "psql -v ON_ERROR_STOP=1 $*"
-  fi
-}
-
 setup_database_and_env() {
   local env_file="$INSTALL_DIR/.env"
   local db_user="opentermius"
   local db_name="opentermius"
+  local db_port="${PGPORT:-5432}"
   local db_pass
 
   if [ -f "$env_file" ]; then
@@ -241,25 +283,38 @@ setup_database_and_env() {
     # shellcheck disable=SC1090
     set -a; source "$env_file"; set +a
   else
-    db_pass="$(openssl rand -hex 16)"
     local app_secret jwt_secret
     app_secret="$(openssl rand -hex 32)"
     jwt_secret="$(openssl rand -hex 32)"
 
-    log "Creating PostgreSQL role '$db_user' and database '$db_name'..."
-    if [ "$PLATFORM" = "macos" ]; then
-      psql -d postgres -tAc "SELECT 1 FROM pg_roles WHERE rolname='$db_user'" | grep -q 1 || \
-        psql -d postgres -c "CREATE ROLE $db_user WITH LOGIN PASSWORD '$db_pass';"
-      psql -d postgres -tAc "SELECT 1 FROM pg_database WHERE datname='$db_name'" | grep -q 1 || \
-        psql -d postgres -c "CREATE DATABASE $db_name OWNER $db_user;"
+    if [ -n "${DATABASE_URL:-}" ]; then
+      ok "Using user-provided DATABASE_URL (skipping local role/database creation)"
     else
-      as_root su - postgres -c "psql -tAc \"SELECT 1 FROM pg_roles WHERE rolname='$db_user'\"" | grep -q 1 || \
-        as_root su - postgres -c "psql -c \"CREATE ROLE $db_user WITH LOGIN PASSWORD '$db_pass';\""
-      as_root su - postgres -c "psql -tAc \"SELECT 1 FROM pg_database WHERE datname='$db_name'\"" | grep -q 1 || \
-        as_root su - postgres -c "psql -c \"CREATE DATABASE $db_name OWNER $db_user;\""
+      db_pass="$(openssl rand -hex 16)"
+      log "Ensuring PostgreSQL role '$db_user' and database '$db_name'..."
+      if [ "$PLATFORM" = "macos" ] && psql -d postgres -c "SELECT 1;" >/dev/null 2>&1; then
+        if psql -d postgres -tAc "SELECT 1 FROM pg_roles WHERE rolname='$db_user'" | grep -q 1; then
+          psql -d postgres -c "ALTER ROLE $db_user WITH LOGIN PASSWORD '$db_pass';"
+        else
+          psql -d postgres -c "CREATE ROLE $db_user WITH LOGIN PASSWORD '$db_pass';"
+        fi
+        psql -d postgres -tAc "SELECT 1 FROM pg_database WHERE datname='$db_name'" | grep -q 1 || \
+          psql -d postgres -c "CREATE DATABASE $db_name OWNER $db_user;"
+      elif id postgres >/dev/null 2>&1; then
+        if as_root su - postgres -c "psql -tAc \"SELECT 1 FROM pg_roles WHERE rolname='$db_user'\"" | grep -q 1; then
+          as_root su - postgres -c "psql -c \"ALTER ROLE $db_user WITH LOGIN PASSWORD '$db_pass';\""
+        else
+          as_root su - postgres -c "psql -c \"CREATE ROLE $db_user WITH LOGIN PASSWORD '$db_pass';\""
+        fi
+        as_root su - postgres -c "psql -tAc \"SELECT 1 FROM pg_database WHERE datname='$db_name'\"" | grep -q 1 || \
+          as_root su - postgres -c "psql -c \"CREATE DATABASE $db_name OWNER $db_user;\""
+      else
+        err "Existing PostgreSQL detected without local 'postgres' superuser. Pass DATABASE_URL='postgres://user:pass@host:5432/opentermius?sslmode=disable' when running install.sh."
+      fi
+
+      DATABASE_URL="postgres://${db_user}:${db_pass}@localhost:${db_port}/${db_name}?sslmode=disable"
     fi
 
-    DATABASE_URL="postgres://${db_user}:${db_pass}@localhost:5432/${db_name}?sslmode=disable"
     cat > "$env_file" <<EOF
 # OpenTermius Gateway Configuration (generated by install.sh)
 SERVER_PORT=8080
@@ -287,7 +342,7 @@ EOF
   log "Applying PostgreSQL migrations..."
   for mig in "$INSTALL_DIR"/migrations/*.up.sql; do
     [ -f "$mig" ] || continue
-    PGPASSWORD="${db_pass:-}" psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$mig" >/dev/null
+    psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$mig" >/dev/null
   done
   ok "Database schema migrated"
 }
