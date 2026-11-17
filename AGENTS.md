@@ -52,7 +52,7 @@ When releasing new client-app changes, ALWAYS bump the version and publish a new
    - macOS `aarch64` DMG: `cd client-app && ./scripts/build-dmg.sh`
 3. **Tag & Publish Release:**
    - Commit & push to `main`: `git commit -m "chore(release): bump version to X.Y.Z" && git tag vX.Y.Z && git push origin main vX.Y.Z`
-   - Create GitHub Release with both assets:
+   - Create GitHub Release with both assets, and ALWAYS include the macOS Gatekeeper Note (`xattr -cr /Applications/OpenTermius.app`) in `--notes`:
      ```bash
      gh release create vX.Y.Z \
        "client-app/src-tauri/gen/android/app/build/outputs/apk/universal/release/app-universal-release.apk#OpenTermius_X.Y.Z_android_universal.apk" \

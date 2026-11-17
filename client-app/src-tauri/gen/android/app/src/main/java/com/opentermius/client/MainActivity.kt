@@ -1,9 +1,13 @@
 package com.opentermius.client
 
+import android.Manifest
 import android.app.Activity
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
 import android.view.View
 import android.view.WindowManager
@@ -11,6 +15,8 @@ import android.webkit.JavascriptInterface
 import android.webkit.WebView
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.enableEdgeToEdge
+import androidx.core.app.ActivityCompat
+import androidx.core.content.ContextCompat
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 
@@ -33,6 +39,31 @@ class AndroidClipboardBridge(private val activity: Activity) {
   fun moveToBackground() {
     activity.runOnUiThread {
       activity.moveTaskToBack(true)
+    }
+  }
+
+  @JavascriptInterface
+  fun setKeepAliveSessions(count: Int) {
+    activity.runOnUiThread {
+      if (count > 0 && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        val granted = ContextCompat.checkSelfPermission(activity, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
+        if (!granted) {
+          ActivityCompat.requestPermissions(activity, arrayOf(Manifest.permission.POST_NOTIFICATIONS), 101)
+        }
+      }
+
+      val intent = Intent(activity, SshKeepAliveService::class.java).apply {
+        putExtra(SshKeepAliveService.EXTRA_SESSION_COUNT, count)
+      }
+      if (count > 0) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+          activity.startForegroundService(intent)
+        } else {
+          activity.startService(intent)
+        }
+      } else {
+        activity.stopService(intent)
+      }
     }
   }
 }

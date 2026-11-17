@@ -97,6 +97,12 @@ Untuk membuka installer DMG:
 open client-app/src-tauri/target/release/bundle/dmg/OpenTermius_0.1.0_aarch64.dmg
 ```
 
+> **macOS Gatekeeper Note (Un-notarized OSS build):**
+> If macOS shows `"OpenTermius" is damaged and can't be opened` after downloading via browser, drag `OpenTermius.app` to `Applications` and run once:
+> ```bash
+> xattr -cr /Applications/OpenTermius.app
+> ```
+
 ### 3. Build Android Mobile App (`.apk`)
 ```bash
 cd client-app

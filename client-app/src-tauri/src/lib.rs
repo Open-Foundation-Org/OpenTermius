@@ -63,9 +63,9 @@ async fn establish_ssh_session(
     passphrase: Option<&str>,
 ) -> Result<client::Handle<SshClientHandler>, String> {
     let config = Arc::new(client::Config {
-        inactivity_timeout: Some(Duration::from_secs(3600)),
-        keepalive_interval: Some(Duration::from_secs(30)),
-        keepalive_max: 3,
+        inactivity_timeout: None,
+        keepalive_interval: Some(Duration::from_secs(15)),
+        keepalive_max: 8,
         ..Default::default()
     });
 
