@@ -271,48 +271,170 @@ clone_or_update_repo() {
   fi
 }
 
+prompt_input() {
+  local __var="$1" __label="$2" __default="$3" __val=""
+  if [ -r /dev/tty ]; then
+    printf "%s [%s]: " "$__label" "$__default" >/dev/tty
+    IFS= read -r __val </dev/tty || true
+  fi
+  [ -z "$__val" ] && __val="$__default"
+  printf -v "$__var" '%s' "$__val"
+}
+
+prompt_secret() {
+  local __var="$1" __label="$2" __default="$3" __val=""
+  if [ -r /dev/tty ]; then
+    printf "%s: " "$__label" >/dev/tty
+    IFS= read -rs __val </dev/tty || true
+    printf "\n" >/dev/tty
+  fi
+  [ -z "$__val" ] && __val="$__default"
+  printf -v "$__var" '%s' "$__val"
+}
+
+urlencode() {
+  local s="$1" out="" i c hex
+  for ((i = 0; i < ${#s}; i++)); do
+    c="${s:i:1}"
+    case "$c" in
+      [a-zA-Z0-9.~_-]) out+="$c" ;;
+      *) printf -v hex '%%%02X' "'$c"; out+="$hex" ;;
+    esac
+  done
+  printf '%s' "$out"
+}
+
+ensure_pg_hba_password_auth() {
+  [ "$PLATFORM" = "macos" ] && return 0
+  id postgres >/dev/null 2>&1 || return 0
+
+  local hba_file
+  hba_file="$(as_root su - postgres -c "psql -tAc 'SHOW hba_file;'" 2>/dev/null | tr -d '[:space:]' || true)"
+  [ -n "$hba_file" ] && [ -f "$hba_file" ] || return 0
+
+  if as_root grep -Eq '^(host|hostnossl)[[:space:]]+all[[:space:]]+all[[:space:]]+(127\.0\.0\.1/32|::1/128)[[:space:]]+ident' "$hba_file"; then
+    log "Updating $hba_file: switching localhost ident -> scram-sha-256..."
+    as_root sed -i.bak -E \
+      's/^((host|hostnossl)[[:space:]]+all[[:space:]]+all[[:space:]]+(127\.0\.0\.1\/32|::1\/128)[[:space:]]+)ident/\1scram-sha-256/' \
+      "$hba_file"
+    as_root su - postgres -c "psql -c 'SELECT pg_reload_conf();'" >/dev/null 2>&1 || true
+    ok "PostgreSQL localhost password auth enabled"
+  fi
+}
+
+ensure_local_pg_role_and_db() {
+  local db_user="$1" db_pass="$2" db_name="$3"
+  local sql_user="${db_user//\'/\'\'}"
+  local sql_pass="${db_pass//\'/\'\'}"
+  local sql_db="${db_name//\'/\'\'}"
+
+  if [ "$PLATFORM" = "macos" ] && psql -d postgres -c "SELECT 1;" >/dev/null 2>&1; then
+    if psql -d postgres -tAc "SELECT 1 FROM pg_roles WHERE rolname='${sql_user}'" | grep -q 1; then
+      [ -n "$db_pass" ] && psql -d postgres -c "ALTER ROLE \"${db_user}\" WITH LOGIN PASSWORD '${sql_pass}';" >/dev/null
+    else
+      if [ -n "$db_pass" ]; then
+        psql -d postgres -c "CREATE ROLE \"${db_user}\" WITH LOGIN PASSWORD '${sql_pass}';" >/dev/null
+      else
+        psql -d postgres -c "CREATE ROLE \"${db_user}\" WITH LOGIN;" >/dev/null
+      fi
+    fi
+    psql -d postgres -tAc "SELECT 1 FROM pg_database WHERE datname='${sql_db}'" | grep -q 1 || \
+      psql -d postgres -c "CREATE DATABASE \"${db_name}\" OWNER \"${db_user}\";" >/dev/null
+    return 0
+  elif id postgres >/dev/null 2>&1; then
+    ensure_pg_hba_password_auth
+    if as_root su - postgres -c "psql -tAc \"SELECT 1 FROM pg_roles WHERE rolname='${sql_user}'\"" | grep -q 1; then
+      [ -n "$db_pass" ] && as_root su - postgres -c "psql -c \"ALTER ROLE \\\"${db_user}\\\" WITH LOGIN PASSWORD '${sql_pass}';\"" >/dev/null
+    else
+      if [ -n "$db_pass" ]; then
+        as_root su - postgres -c "psql -c \"CREATE ROLE \\\"${db_user}\\\" WITH LOGIN PASSWORD '${sql_pass}';\"" >/dev/null
+      else
+        as_root su - postgres -c "psql -c \"CREATE ROLE \\\"${db_user}\\\" WITH LOGIN;\"" >/dev/null
+      fi
+    fi
+    as_root su - postgres -c "psql -tAc \"SELECT 1 FROM pg_database WHERE datname='${sql_db}'\"" | grep -q 1 || \
+      as_root su - postgres -c "psql -c \"CREATE DATABASE \\\"${db_name}\\\" OWNER \\\"${db_user}\\\";\"" >/dev/null
+    return 0
+  fi
+  return 1
+}
+
 setup_database_and_env() {
   local env_file="$INSTALL_DIR/.env"
-  local db_user="opentermius"
-  local db_name="opentermius"
+  local keep_env="Y"
+  local db_host="localhost"
   local db_port="${PGPORT:-5432}"
-  local db_pass
+  local db_name="opentermius"
+  local db_user="opentermius"
+  local db_pass=""
+  local use_existing="N"
 
   if [ -f "$env_file" ]; then
-    ok "Preserving existing $env_file"
-    # shellcheck disable=SC1090
-    set -a; source "$env_file"; set +a
-  else
+    prompt_input keep_env "Existing .env found at $env_file. Keep it? (Y/n)" "Y"
+    if [[ "$keep_env" =~ ^[Yy]$ ]]; then
+      ok "Preserving existing $env_file"
+      # shellcheck disable=SC1090
+      set -a; source "$env_file"; set +a
+    fi
+  fi
+
+  if [ ! -f "$env_file" ] || [[ ! "$keep_env" =~ ^[Yy]$ ]]; then
     local app_secret jwt_secret
     app_secret="$(openssl rand -hex 32)"
     jwt_secret="$(openssl rand -hex 32)"
 
     if [ -n "${DATABASE_URL:-}" ]; then
-      ok "Using user-provided DATABASE_URL (skipping local role/database creation)"
+      ok "Using user-provided DATABASE_URL"
     else
-      db_pass="$(openssl rand -hex 16)"
-      log "Ensuring PostgreSQL role '$db_user' and database '$db_name'..."
-      if [ "$PLATFORM" = "macos" ] && psql -d postgres -c "SELECT 1;" >/dev/null 2>&1; then
-        if psql -d postgres -tAc "SELECT 1 FROM pg_roles WHERE rolname='$db_user'" | grep -q 1; then
-          psql -d postgres -c "ALTER ROLE $db_user WITH LOGIN PASSWORD '$db_pass';"
-        else
-          psql -d postgres -c "CREATE ROLE $db_user WITH LOGIN PASSWORD '$db_pass';"
-        fi
-        psql -d postgres -tAc "SELECT 1 FROM pg_database WHERE datname='$db_name'" | grep -q 1 || \
-          psql -d postgres -c "CREATE DATABASE $db_name OWNER $db_user;"
-      elif id postgres >/dev/null 2>&1; then
-        if as_root su - postgres -c "psql -tAc \"SELECT 1 FROM pg_roles WHERE rolname='$db_user'\"" | grep -q 1; then
-          as_root su - postgres -c "psql -c \"ALTER ROLE $db_user WITH LOGIN PASSWORD '$db_pass';\""
-        else
-          as_root su - postgres -c "psql -c \"CREATE ROLE $db_user WITH LOGIN PASSWORD '$db_pass';\""
-        fi
-        as_root su - postgres -c "psql -tAc \"SELECT 1 FROM pg_database WHERE datname='$db_name'\"" | grep -q 1 || \
-          as_root su - postgres -c "psql -c \"CREATE DATABASE $db_name OWNER $db_user;\""
+      if postgres_already_running; then
+        prompt_input use_existing "PostgreSQL detected. Connect to an existing database? (Y/n)" "Y"
       else
-        err "Existing PostgreSQL detected without local 'postgres' superuser. Pass DATABASE_URL='postgres://user:pass@host:5432/opentermius?sslmode=disable' when running install.sh."
+        prompt_input use_existing "Connect to an existing external/local PostgreSQL database? (y/N)" "N"
       fi
 
-      DATABASE_URL="postgres://${db_user}:${db_pass}@localhost:${db_port}/${db_name}?sslmode=disable"
+      if [[ "$use_existing" =~ ^[Yy]$ ]]; then
+        prompt_input db_host "Database host" "localhost"
+        prompt_input db_port "Database port" "${PGPORT:-5432}"
+        prompt_input db_name "Database name" "opentermius"
+        prompt_input db_user "Database username" "opentermius"
+        prompt_secret db_pass "Database password (hidden; leave empty if none)" ""
+
+        if [ "$db_host" = "localhost" ] || [ "$db_host" = "127.0.0.1" ]; then
+          ensure_pg_hba_password_auth
+        fi
+
+        local enc_user enc_pass
+        enc_user="$(urlencode "$db_user")"
+        enc_pass="$(urlencode "$db_pass")"
+        if [ -n "$db_pass" ]; then
+          DATABASE_URL="postgres://${enc_user}:${enc_pass}@${db_host}:${db_port}/${db_name}?sslmode=disable"
+        else
+          DATABASE_URL="postgres://${enc_user}@${db_host}:${db_port}/${db_name}?sslmode=disable"
+        fi
+
+        if ! psql "$DATABASE_URL" -c "SELECT 1;" >/dev/null 2>&1; then
+          if [ "$db_host" = "localhost" ] || [ "$db_host" = "127.0.0.1" ]; then
+            warn "Could not connect as '${db_user}' yet; attempting to create/sync role & DB locally..."
+            ensure_local_pg_role_and_db "$db_user" "$db_pass" "$db_name" || \
+              err "Failed to connect or initialize local database '${db_name}' for user '${db_user}'."
+          else
+            err "Cannot connect to ${db_host}:${db_port}/${db_name} as '${db_user}'. Check host, port, credentials, and pg_hba.conf."
+          fi
+        fi
+      else
+        prompt_input db_user "New database username" "opentermius"
+        prompt_secret db_pass "New database password (hidden; Enter = auto-generate)" ""
+        [ -z "$db_pass" ] && db_pass="$(openssl rand -hex 16)"
+
+        log "Ensuring PostgreSQL role '$db_user' and database '$db_name'..."
+        ensure_local_pg_role_and_db "$db_user" "$db_pass" "$db_name" || \
+          err "Could not create role/database automatically. Re-run and choose existing DB or pass DATABASE_URL."
+
+        local enc_user enc_pass
+        enc_user="$(urlencode "$db_user")"
+        enc_pass="$(urlencode "$db_pass")"
+        DATABASE_URL="postgres://${enc_user}:${enc_pass}@${db_host}:${db_port}/${db_name}?sslmode=disable"
+      fi
     fi
 
     cat > "$env_file" <<EOF
