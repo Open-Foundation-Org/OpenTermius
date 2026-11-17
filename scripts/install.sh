@@ -399,26 +399,31 @@ setup_database_and_env() {
         prompt_input db_user "Database username" "opentermius"
         prompt_secret db_pass "Database password (hidden; leave empty if none)" ""
 
+        local default_ssl="require"
         if [ "$db_host" = "localhost" ] || [ "$db_host" = "127.0.0.1" ]; then
+          default_ssl="disable"
           ensure_pg_hba_password_auth
         fi
+        local db_ssl=""
+        prompt_input db_ssl "Database SSL mode (disable/require/verify-full)" "$default_ssl"
 
         local enc_user enc_pass
         enc_user="$(urlencode "$db_user")"
         enc_pass="$(urlencode "$db_pass")"
         if [ -n "$db_pass" ]; then
-          DATABASE_URL="postgres://${enc_user}:${enc_pass}@${db_host}:${db_port}/${db_name}?sslmode=disable"
+          DATABASE_URL="postgres://${enc_user}:${enc_pass}@${db_host}:${db_port}/${db_name}?sslmode=${db_ssl}"
         else
-          DATABASE_URL="postgres://${enc_user}@${db_host}:${db_port}/${db_name}?sslmode=disable"
+          DATABASE_URL="postgres://${enc_user}@${db_host}:${db_port}/${db_name}?sslmode=${db_ssl}"
         fi
 
-        if ! psql "$DATABASE_URL" -c "SELECT 1;" >/dev/null 2>&1; then
+        local psql_err=""
+        if ! psql_err="$(psql "$DATABASE_URL" -c "SELECT 1;" 2>&1 >/dev/null)"; then
           if [ "$db_host" = "localhost" ] || [ "$db_host" = "127.0.0.1" ]; then
             warn "Could not connect as '${db_user}' yet; attempting to create/sync role & DB locally..."
             ensure_local_pg_role_and_db "$db_user" "$db_pass" "$db_name" || \
-              err "Failed to connect or initialize local database '${db_name}' for user '${db_user}'."
+              err "Failed to connect or initialize local database '${db_name}' for user '${db_user}': ${psql_err}"
           else
-            err "Cannot connect to ${db_host}:${db_port}/${db_name} as '${db_user}'. Check host, port, credentials, and pg_hba.conf."
+            err "Cannot connect to ${db_host}:${db_port}/${db_name} as '${db_user}': ${psql_err}"
           fi
         fi
       else
