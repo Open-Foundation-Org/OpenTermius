@@ -1,0 +1,195 @@
+name: Build & Release All Platforms
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag to build & attach assets to (e.g. v0.4.1)'
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  ensure-release:
+    runs-on: [self-hosted, Linux, X64]
+    outputs:
+      tag: ${{ steps.meta.outputs.tag }}
+      version: ${{ steps.meta.outputs.version }}
+    steps:
+      - name: Resolve tag & ensure GitHub Release exists
+        id: meta
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}"
+          VER="${TAG#v}"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "version=${VER}" >> "$GITHUB_OUTPUT"
+
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            gh release create "$TAG" \
+              --title "OpenTermius ${TAG}" \
+              --notes $'## OpenTermius '"${TAG}"$'\n\n### macOS Gatekeeper Note (Un-notarized OSS build)\nIf macOS shows `"OpenTermius" is damaged and can'\''t be opened` after downloading via browser, drag `OpenTermius.app` to `Applications` and run once:\n```bash\nxattr -cr /Applications/OpenTermius.app\n```'
+          fi
+
+  build-linux:
+    needs: ensure-release
+    runs-on: [self-hosted, Linux, X64]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.ensure-release.outputs.tag }}
+
+      - name: Install Tauri Linux dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev build-essential curl wget file \
+            libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev patchelf
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: client-app/package-lock.json
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Build Linux (.deb & .AppImage)
+        working-directory: client-app
+        run: |
+          npm ci
+          npx tauri build --bundles deb,appimage
+
+      - name: Upload Linux assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.ensure-release.outputs.tag }}
+          VER: ${{ needs.ensure-release.outputs.version }}
+        run: |
+          DEB_FILE=$(find client-app/src-tauri/target/release/bundle/deb -name "*.deb" | head -n 1)
+          APPIMAGE_FILE=$(find client-app/src-tauri/target/release/bundle/appimage -name "*.AppImage" | head -n 1)
+          ASSETS=()
+          [ -n "$DEB_FILE" ] && ASSETS+=("${DEB_FILE}#OpenTermius_${VER}_linux_amd64.deb")
+          [ -n "$APPIMAGE_FILE" ] && ASSETS+=("${APPIMAGE_FILE}#OpenTermius_${VER}_linux_amd64.AppImage")
+          gh release upload "$TAG" "${ASSETS[@]}" --clobber
+
+  build-android:
+    needs: ensure-release
+    runs-on: [self-hosted, Linux, X64]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.ensure-release.outputs.tag }}
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Install Android NDK 27
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platforms;android-35" "build-tools;35.0.0" "ndk;27.2.12479018"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: client-app/package-lock.json
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android,armv7-linux-androideabi,i686-linux-android,x86_64-linux-android
+
+      - name: Build Android Universal APK
+        working-directory: client-app
+        env:
+          NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/27.2.12479018
+        run: |
+          npm ci
+          npx tauri android build --apk
+
+      - name: Upload Android APK
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.ensure-release.outputs.tag }}
+          VER: ${{ needs.ensure-release.outputs.version }}
+        run: |
+          APK_FILE=$(find client-app/src-tauri/gen/android/app/build/outputs/apk -name "*release*.apk" | head -n 1)
+          gh release upload "$TAG" "${APK_FILE}#OpenTermius_${VER}_android_universal.apk" --clobber
+
+  build-macos:
+    needs: ensure-release
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.ensure-release.outputs.tag }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: client-app/package-lock.json
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin
+
+      - name: Build macOS DMG (aarch64)
+        working-directory: client-app
+        run: |
+          npm ci
+          ./scripts/build-dmg.sh
+
+      - name: Upload macOS DMG
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.ensure-release.outputs.tag }}
+          VER: ${{ needs.ensure-release.outputs.version }}
+        run: |
+          DMG_FILE=$(find client-app/src-tauri/target/release/bundle/dmg -name "*.dmg" | head -n 1)
+          gh release upload "$TAG" "${DMG_FILE}#OpenTermius_${VER}_macOS_aarch64.dmg" --clobber
+
+  build-windows:
+    needs: ensure-release
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.ensure-release.outputs.tag }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: client-app/package-lock.json
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Build Windows (.exe & .msi)
+        working-directory: client-app
+        run: |
+          npm ci
+          npx tauri build --bundles nsis,msi
+
+      - name: Upload Windows installers
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.ensure-release.outputs.tag }}
+          VER: ${{ needs.ensure-release.outputs.version }}
+        run: |
+          $exe = Get-ChildItem -Path client-app/src-tauri/target/release/bundle/nsis -Filter *.exe | Select-Object -First 1
+          $msi = Get-ChildItem -Path client-app/src-tauri/target/release/bundle/msi -Filter *.msi | Select-Object -First 1
+          $assets = @()
+          if ($exe) { $assets += "$($exe.FullName)#OpenTermius_${env:VER}_windows_x64-setup.exe" }
+          if ($msi) { $assets += "$($msi.FullName)#OpenTermius_${env:VER}_windows_x64.msi" }
+          gh release upload $env:TAG @assets --clobber
