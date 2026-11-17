@@ -84,6 +84,16 @@ func (p *PresenceUseCase) SetSessionViewers(sessionID string, viewers []RelayPar
 	p.sessionViewers[sessionID] = cp
 }
 
+func (p *PresenceUseCase) RevokeSessionApprovals(sessionID string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	for id, req := range p.requests {
+		if req.SessionID == sessionID {
+			delete(p.requests, id)
+		}
+	}
+}
+
 func (p *PresenceUseCase) GetUserName(ctx context.Context, userID uuid.UUID) string {
 	user, err := p.userRepo.GetByID(ctx, userID)
 	if err == nil && user != nil && user.Name != "" {

@@ -294,6 +294,7 @@ func (h *CollabHandler) RelayWS(w http.ResponseWriter, r *http.Request) {
 		if mode == "host" {
 			if room.host == peer {
 				room.host = nil
+				h.presenceUC.RevokeSessionApprovals(sessionID)
 			}
 			endedMsg, _ := json.Marshal(map[string]any{
 				"type":   "relay_ended",
