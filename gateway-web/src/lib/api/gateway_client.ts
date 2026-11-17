@@ -60,13 +60,14 @@ function resolveDefaultApiBase(): string {
   if (envBase && envBase.trim()) {
     return envBase.trim().replace(/\/+$/, '');
   }
+  const envPort = ((import.meta as any).env?.VITE_API_PORT as string | undefined)?.trim() || '8080';
   if (typeof window !== 'undefined') {
     const { protocol, hostname } = window.location;
     if (hostname) {
-      return `${protocol}//${hostname}:8080/api/v1`;
+      return `${protocol}//${hostname}:${envPort}/api/v1`;
     }
   }
-  return 'http://localhost:8080/api/v1';
+  return `http://localhost:${envPort}/api/v1`;
 }
 
 class GatewayApiClient {
