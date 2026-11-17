@@ -292,7 +292,7 @@
           <div class="dots">
             <span class="dot r"></span><span class="dot y"></span><span class="dot g"></span>
           </div>
-          <span class="player-title" id="player-title">OpenTermius v0.2.0 — 01. Native Rust SSH</span>
+          <span class="player-title" id="player-title">OpenTermius v0.4.0 — 01. Native Rust SSH</span>
           <button type="button" class="play-btn" id="play-toggle">⏸ Pause</button>
         </div>
         <div class="progress-track"><div class="progress-fill" id="progress-fill"></div></div>
@@ -410,7 +410,7 @@
 
   <section id="features">
     <div class="wrap">
-      <h2>Everything included in v0.2.0</h2>
+      <h2>Everything included in v0.4.0</h2>
       <p class="sub">Every core SSH, SFTP, encryption, and team collaboration feature unlocked for free.</p>
       <div class="grid">
         <div class="card">
@@ -435,8 +435,8 @@
         </div>
         <div class="card">
           <div class="icon">⇄</div>
-          <h3>Live Request Remote</h3>
-          <p>See teammates active SSH sessions and request View-Only or Control access over a Zero-SSH WebSocket Binary Relay.</p>
+          <h3>Live Request Remote &amp; Rejoin</h3>
+          <p>See teammates active SSH sessions, request View-Only or Control access over a Zero-SSH WebSocket Binary Relay, 1-click Rejoin, live participant avatars, typing tooltips, and auto-close when host stops sharing.</p>
         </div>
         <div class="card">
           <div class="icon">⟳</div>
@@ -465,8 +465,8 @@
         </div>
         <div class="card">
           <div class="icon">📱</div>
-          <h3>Mobile-Native Ergonomics</h3>
-          <p>Material 3 bottom nav, full-screen host editor, 1-tap vault switcher, swipe-back protection, and boot splash.</p>
+          <h3>Mobile-Native &amp; Keep-Alive</h3>
+          <p>Android Foreground Service keeps SSH alive on lock/minimize, Focus Mode, overflow ⋮ menu, safe-area insets, real-time IME streaming, and 1-tap vault switcher.</p>
         </div>
         <div class="card">
           <div class="icon">✈</div>
@@ -551,28 +551,25 @@
           <span class="tag soon">Build it yourself</span>
         </div>
       </div>
+      <div class="card" style="margin-top:16px">
+        <h3>macOS Gatekeeper Note (Un-notarized OSS build)</h3>
+        <p style="margin-top:6px">If macOS shows <code>"OpenTermius" is damaged and can't be opened</code> after downloading via browser, drag <code>OpenTermius.app</code> to <code>Applications</code> and run once:</p>
+        <pre style="margin-top:10px">xattr -cr /Applications/OpenTermius.app</pre>
+      </div>
     </div>
   </section>
 
   <section id="self-host">
     <div class="wrap">
       <h2>Run your own gateway</h2>
-      <p class="sub">The gateway stores encrypted vaults and syncs your devices. You need Go 1.24+, Node.js 22+, and PostgreSQL 15+.</p>
-<pre><span class="cmt"># 1. Get the code and set up your environment</span>
-git clone https://github.com/wisnu-w/OpenTermius.git
-cd OpenTermius
-cp .env.example .env
+      <p class="sub">1-Command installer for Ubuntu, Debian, Fedora, RHEL, Arch, Alpine, and macOS (auto-detects existing PostgreSQL &amp; ports):</p>
+<pre><span class="cmt"># 1-Command Gateway + PostgreSQL + Web Console Installer</span>
+curl -fsSL https://raw.githubusercontent.com/wisnu-w/OpenTermius/main/scripts/install.sh | bash
 
-<span class="cmt"># 2. Create the database tables</span>
-psql -d opentermius -f migrations/000001_init.up.sql
-
-<span class="cmt"># 3. Start the gateway API (port 8080)</span>
-cd backend && go run cmd/api/main.go
-
-<span class="cmt"># 4. Start the web console to manage users and teams (port 5174)</span>
-cd ../gateway-web && npm install && npm run dev</pre>
+<span class="cmt"># Or target an existing / cloud DB (e.g. Supabase) directly:</span>
+DATABASE_URL="postgres://user:pass@host:5432/opentermius?sslmode=require" curl -fsSL https://raw.githubusercontent.com/wisnu-w/OpenTermius/main/scripts/install.sh | bash</pre>
       <p class="sub" style="margin-top:18px">
-        Then open the app, choose <strong>Connect to Gateway</strong>, and enter your gateway URL.
+        Then open the app, choose <strong>Connect to Gateway</strong>, and enter <code>http://&lt;your-server-ip&gt;:&lt;api-port&gt;/api/v1</code>.
         Read the <a href="https://github.com/wisnu-w/OpenTermius#readme" style="color:var(--accent)">README</a> for full setup steps.
       </p>
     </div>
@@ -599,11 +596,11 @@ cd ../gateway-web && npm install && npm run dev</pre>
   <script>
     (function () {
       const titles = [
-        'OpenTermius v0.2.0 — 01. Native Rust SSH',
-        'OpenTermius v0.2.0 — 02. SFTP File Manager',
-        'OpenTermius v0.2.0 — 03. E2EE Vaults & Live Remote Relay',
-        'OpenTermius v0.2.0 — 04. Termux 2x7 Keys & Touch Selection',
-        'OpenTermius v0.2.0 — 05. Zero Paywall Forever'
+        'OpenTermius v0.4.0 — 01. Native Rust SSH',
+        'OpenTermius v0.4.0 — 02. SFTP File Manager',
+        'OpenTermius v0.4.0 — 03. E2EE Vaults & Live Remote Relay',
+        'OpenTermius v0.4.0 — 04. Android Keep-Alive & Focus Mode',
+        'OpenTermius v0.4.0 — 05. Zero Paywall Forever'
       ];
       const DURATION = 5000;
       let current = 0;
