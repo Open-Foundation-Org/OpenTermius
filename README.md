@@ -28,6 +28,12 @@ OpenTermius is a 100% free, self-hostable, open-source alternative to Termius. I
 - Node.js 22+ & npm
 - PostgreSQL 15+ (or Supabase connection via `.env`)
 
+### 0. One-Command Gateway Installer (Ubuntu / Debian / RHEL / Fedora / Arch / Alpine / macOS)
+Install PostgreSQL, Go 1.24, Node.js, database migrations, Gateway API (`:8080`), and Gateway Web UI (`:5174`) in one command:
+```bash
+curl -fsSL https://raw.githubusercontent.com/wisnu-w/OpenTermius/main/scripts/install.sh | bash
+```
+
 ### 1. Configure Environment
 ```bash
 cp .env.example .env
