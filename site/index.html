@@ -936,7 +936,7 @@
       <span class="accent-grad">Live Team Relay &amp; E2EE Vaults.</span>
     </h1>
     <p class="hero-sub">
-      Built with Tauri v2, <code>russh</code>, and Go 1.24. Watch the interactive feature reels below to see Live Request Remote, 1-click Rejoin, Gateway Web Admin Console, hybrid offline sync, and Android Foreground Keep-Alive in action.
+      Native SSH and SFTP for macOS and Android with encrypted Team Vaults, live terminal sharing, and your own Gateway console.
     </p>
     <div class="cta-row">
       <a class="btn-island btn-primary" href="https://github.com/wisnu-w/OpenTermius/releases/latest">
@@ -1326,12 +1326,12 @@
               </div>
 
               <div style="display:flex; flex-direction:column; gap:14px">
-                <div class="sec-eyebrow mono" style="margin:0">// Mobile Ergonomics &amp; Persistence</div>
+                <div class="sec-eyebrow mono" style="margin:0">// Mobile Ergonomics</div>
                 <h3 style="font-size:24px; font-weight:800; letter-spacing:-0.02em">
-                  Never drops on lock screen. Built for one-thumb control.
+                  Stays connected when locked. Built for one-thumb control.
                 </h3>
                 <p style="color:var(--muted); font-size:14.5px">
-                  Watch the phone simulation: tapping <strong>Focus Mode (⤢)</strong> collapses the outer header for maximum terminal rows, characters stream live without Android predictive-text buffering, and minimizing the app triggers <code>SshKeepAliveService</code> so active SSH tunnels stay alive.
+                  Tap <strong>Focus Mode (⤢)</strong> for extra screen space, type smoothly with 2x7 Extra Keys, and keep SSH alive in the background.
                 </p>
               </div>
             </div>
@@ -1426,10 +1426,10 @@
   <section id="exclusive">
     <div class="wrap">
       <div class="sec-head reveal">
-        <span class="sec-eyebrow mono">// Exclusive Architecture</span>
-        <h2>Built for engineers who refuse subscription lock-in.</h2>
+        <span class="sec-eyebrow mono">// Core Highlights</span>
+        <h2>Built for teams. Free forever.</h2>
         <p class="sec-desc">
-          Every collaboration, administration, and mobile persistence capability is engineered into the open-source core.
+          Every collaboration, sync, and mobile feature included out of the box.
         </p>
       </div>
 
@@ -1437,18 +1437,18 @@
         <div class="bezel-shell span-7 reveal">
           <div class="bezel-core bento-core">
             <div class="bento-idx mono">
-              <span>01 // Zero-SSH Blind Binary Relay</span>
-              <span>WebSocket ArrayBuffer</span>
+              <span>01 // Blind Relay</span>
+              <span>WebSocket</span>
             </div>
-            <h3>Live Request Remote, 1-Click Rejoin &amp; Typing Telemetry</h3>
+            <h3>Live Request Remote &amp; 1-Click Rejoin</h3>
             <p>
-              Unlike bastion proxies that terminate SSH on a central server, OpenTermius keeps the SSH connection 100% native on the host device via Rust <code>russh</code>. When teammates in a shared Team Vault request <strong>View-Only</strong> or <strong>Control</strong> access, the Gateway relays raw PTY binary frames with sub-millisecond overhead.
+              Share active SSH sessions in Team Vaults with View or Control access while SSH stays 100% on your device.
             </p>
             <ul class="spec-list mono">
-              <li class="spec-chip">1-Click Rejoin while host shares</li>
-              <li class="spec-chip">Circular live participant avatars</li>
-              <li class="spec-chip">Real-time "{User} is typing..." pill</li>
-              <li class="spec-chip">Auto-close &amp; revoke when host stops sharing</li>
+              <li class="spec-chip">1-Click Rejoin</li>
+              <li class="spec-chip">Live participant avatars</li>
+              <li class="spec-chip">Typing indicator</li>
+              <li class="spec-chip">Auto-close on stop</li>
             </ul>
           </div>
         </div>
@@ -1456,17 +1456,17 @@
         <div class="bezel-shell span-5 reveal">
           <div class="bezel-core bento-core">
             <div class="bento-idx mono">
-              <span>02 // Self-Hosted Control Plane</span>
-              <span>Svelte 5 + Go 1.24</span>
+              <span>02 // Admin Portal</span>
+              <span>Gateway Web</span>
             </div>
             <h3>Gateway Web Admin Console</h3>
             <p>
-              Manage your entire team from a dedicated web dashboard. Provision accounts, create shared Team Vaults with <code>Owner</code>, <code>Admin</code>, and <code>Member</code> roles, inspect live online devices, and see active SSH sessions across your organization in real time.
+              Manage users, Team Vault roles, and monitor online devices and active SSH sessions in real time.
             </p>
             <ul class="spec-list mono">
-              <li class="spec-chip">Zero-knowledge vault storage</li>
-              <li class="spec-chip">Auto-detected API origin &amp; port</li>
-              <li class="spec-chip">Session audit logs</li>
+              <li class="spec-chip">Zero-knowledge storage</li>
+              <li class="spec-chip">Live presence</li>
+              <li class="spec-chip">Audit logs</li>
             </ul>
           </div>
         </div>
@@ -1474,12 +1474,12 @@
         <div class="bezel-shell span-4 reveal">
           <div class="bezel-core bento-core">
             <div class="bento-idx mono">
-              <span>03 // Continuity</span>
+              <span>03 // Hybrid Sync</span>
               <span>AES-256-GCM</span>
             </div>
-            <h3>Auto-Online &amp; Offline Local Fallback</h3>
+            <h3>Auto-Online &amp; Offline Fallback</h3>
             <p>
-              An 8-second presence heartbeat seamlessly transitions between <code>Online · Gateway</code> and <code>Offline · Local</code>. Offline edits queue locally and sync automatically when your gateway is reachable again.
+              Switches to local encrypted storage when offline and syncs queued changes automatically on reconnect.
             </p>
           </div>
         </div>
@@ -1487,12 +1487,12 @@
         <div class="bezel-shell span-4 reveal">
           <div class="bezel-core bento-core">
             <div class="bento-idx mono">
-              <span>04 // Mobile Precision</span>
-              <span>Android &amp; Tablet</span>
+              <span>04 // Mobile</span>
+              <span>Android</span>
             </div>
-            <h3>Foreground Keep-Alive &amp; Focus Mode</h3>
+            <h3>Keep-Alive &amp; Focus Mode</h3>
             <p>
-              Android Foreground Service (<code>PARTIAL_WAKE_LOCK</code>) + 15s SSH keep-alives prevent disconnects when your screen locks. Includes 1-tap Focus Mode, overflow <code>⋮</code> menu, 2x7 Termux keys, and unbuffered IME streaming.
+              Keeps SSH sessions alive when minimized or locked, with Focus Mode and 2x7 Extra Keys.
             </p>
           </div>
         </div>
@@ -1500,12 +1500,12 @@
         <div class="bezel-shell span-4 reveal">
           <div class="bezel-core bento-core">
             <div class="bento-idx mono">
-              <span>05 // Native Binary</span>
-              <span>&lt;10 MB Bundle</span>
+              <span>05 // Native Engine</span>
+              <span>Rust</span>
             </div>
-            <h3>In-Memory Rust PTY &amp; SFTP Browser</h3>
+            <h3>Native SSH &amp; SFTP Browser</h3>
             <p>
-              Powered by Tauri v2, <code>russh</code>, and <code>russh-sftp</code>. Browse remote files, upload/download, split terminal panes horizontally or vertically, and manage ED25519/RSA keys with zero local listening ports.
+              Fast <code>russh</code> terminal with split panes, SFTP file transfers, and ED25519/RSA key management.
             </p>
           </div>
         </div>
@@ -1517,26 +1517,26 @@
   <section id="self-host">
     <div class="wrap">
       <div class="sec-head reveal">
-        <span class="sec-eyebrow mono">// 1-Command Deployment</span>
-        <h2>Deploy your Gateway in 60 seconds.</h2>
+        <span class="sec-eyebrow mono">// Self-Host</span>
+        <h2>Deploy your Gateway in one command.</h2>
         <p class="sec-desc">
-          Supports Ubuntu, Debian, Fedora, RHEL/Alma/Rocky, Arch, Alpine, and macOS. Automatically detects existing PostgreSQL servers, configures <code>pg_hba.conf</code>, resolves port conflicts, builds the Go API + Web Console, and registers <code>systemd</code> services.
+          Works on Linux and macOS. Sets up PostgreSQL, Gateway API, and Web Console automatically.
         </p>
       </div>
 
       <div class="bezel-shell reveal">
         <div class="bezel-core bento-core">
           <div class="bento-idx mono">
-            <span>Universal Installer (Interactive DB &amp; Port Detection)</span>
+            <span>Quick Install</span>
             <span>scripts/install.sh</span>
           </div>
-          <p>Paste into your VPS or macOS terminal:</p>
+          <p>Run on your server or Mac:</p>
           <div class="cmd-box">
             <code id="cmd-install">curl -fsSL https://raw.githubusercontent.com/wisnu-w/OpenTermius/main/scripts/install.sh | bash</code>
             <button type="button" class="copy-btn mono" data-copy="cmd-install">Copy</button>
           </div>
 
-          <p style="margin-top:22px">Or connect directly to an existing managed PostgreSQL database (Supabase, Neon, RDS) with TLS:</p>
+          <p style="margin-top:22px">Or use an external PostgreSQL database (such as Supabase):</p>
           <div class="cmd-box">
             <code id="cmd-supabase">DATABASE_URL="postgres://user:pass@host:5432/postgres?sslmode=require" curl -fsSL https://raw.githubusercontent.com/wisnu-w/OpenTermius/main/scripts/install.sh | bash</code>
             <button type="button" class="copy-btn mono" data-copy="cmd-supabase">Copy</button>
