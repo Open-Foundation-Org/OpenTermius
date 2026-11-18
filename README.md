@@ -127,8 +127,7 @@ cd client-app && ./scripts/build-apk.sh release
 - [Architecture](docs/architecture.md) · [API Reference](docs/api.md) · [Database Schema](docs/database.md) · [Security Model](docs/security.md)
 - Licensed under the [Apache-2.0 License](LICENSE).
 
-## Code Signing & Privacy Policy
+## Privacy Policy
 
-- **Windows Code Signing:** Free code signing on Windows provided by [SignPath.io](https://signpath.io/), certificate by [SignPath Foundation](https://signpath.org/).
-- **Committers & Approvers:** [Wisnu (`@wisnu-w`)](https://github.com/wisnu-w)
-- **Privacy Policy:** This program will not transfer any information to other networked systems unless specifically requested by the user or the person installing or operating it. OpenTermius operates in 100% offline Standalone Mode by default, or connects only to user-configured SSH servers and self-hosted Gateway URLs.
+- **Privacy Policy:** [https://wisnu-w.github.io/OpenTermius/privacy.html](https://wisnu-w.github.io/OpenTermius/privacy.html)
+- This program will not transfer any information to other networked systems unless specifically requested by the user or the person installing or operating it. OpenTermius operates in 100% offline Standalone Mode by default, or connects only to user-configured SSH servers and self-hosted Gateway URLs.
