@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, UNIX_EPOCH};
 
 use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize};
@@ -12,16 +12,88 @@ use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, State};
 use tokio::io::AsyncWriteExt;
 
-struct SshClientHandler;
+static KNOWN_HOSTS: OnceLock<Mutex<HashMap<String, String>>> = OnceLock::new();
+
+fn known_hosts_path() -> Option<PathBuf> {
+    std::env::var("HOME")
+        .ok()
+        .map(PathBuf::from)
+        .filter(|p| p.exists())
+        .map(|p| p.join(".opentermius_known_hosts.json"))
+}
+
+fn verify_or_record_host_key(host_port: &str, key_repr: &str) -> bool {
+    let mutex = KNOWN_HOSTS.get_or_init(|| {
+        let map = known_hosts_path()
+            .and_then(|p| std::fs::read_to_string(p).ok())
+            .and_then(|s| serde_json::from_str::<HashMap<String, String>>(&s).ok())
+            .unwrap_or_default();
+        Mutex::new(map)
+    });
+
+    let Ok(mut map) = mutex.lock() else {
+        return true;
+    };
+
+    if let Some(existing) = map.get(host_port) {
+        return existing == key_repr;
+    }
+
+    map.insert(host_port.to_string(), key_repr.to_string());
+    if let Some(path) = known_hosts_path() {
+        if let Ok(json) = serde_json::to_string_pretty(&*map) {
+            let _ = std::fs::write(path, json);
+        }
+    }
+    true
+}
+
+fn drain_utf8_chunk(pending: &mut Vec<u8>, incoming: &[u8]) -> String {
+    pending.extend_from_slice(incoming);
+    let mut out = String::new();
+    loop {
+        match std::str::from_utf8(pending) {
+            Ok(valid) => {
+                out.push_str(valid);
+                pending.clear();
+                break;
+            }
+            Err(e) => {
+                let valid_len = e.valid_up_to();
+                if valid_len > 0 {
+                    if let Ok(valid) = std::str::from_utf8(&pending[..valid_len]) {
+                        out.push_str(valid);
+                    }
+                }
+                match e.error_len() {
+                    Some(invalid_len) => {
+                        out.push('\u{FFFD}');
+                        pending.drain(..valid_len + invalid_len);
+                    }
+                    None => {
+                        pending.drain(..valid_len);
+                        break;
+                    }
+                }
+            }
+        }
+    }
+    out
+}
+
+struct SshClientHandler {
+    host_port: String,
+}
 
 impl client::Handler for SshClientHandler {
     type Error = russh::Error;
 
     async fn check_server_key(
         &mut self,
-        _server_public_key: &PublicKeyOrCertificate,
+        server_public_key: &PublicKeyOrCertificate,
     ) -> Result<bool, Self::Error> {
-        Ok(true)
+        let key_repr = format!("{:?}", server_public_key);
+        Ok(verify_or_record_host_key(&self.host_port, &key_repr))
     }
 }
 
@@ -71,13 +143,16 @@ async fn establish_ssh_session(
     });
 
     let addr = (host, port);
+    let handler = SshClientHandler {
+        host_port: format!("{}:{}", host.trim(), port),
+    };
     let mut session = tokio::time::timeout(
         Duration::from_secs(15),
-        client::connect(config, addr, SshClientHandler),
+        client::connect(config, addr, handler),
     )
     .await
     .map_err(|_| format!("Connection timed out to {}:{}", host, port))?
-    .map_err(|e| format!("SSH connection failed: {}", e))?;
+    .map_err(|e| format!("SSH connection failed (or host key mismatch): {}", e))?;
 
     let user = if username.trim().is_empty() {
         "root"
@@ -165,17 +240,18 @@ async fn terminal_open(
 
         tauri::async_runtime::spawn(async move {
             let event_name = format!("terminal-data:{}", session_id_clone);
+            let mut utf8_pending = Vec::new();
             while let Some(msg) = read_half.wait().await {
                 match msg {
                     ChannelMsg::Data { ref data } => {
-                        let chunk = String::from_utf8_lossy(data).to_string();
-                        if app_clone.emit(&event_name, chunk).is_err() {
+                        let chunk = drain_utf8_chunk(&mut utf8_pending, data);
+                        if !chunk.is_empty() && app_clone.emit(&event_name, chunk).is_err() {
                             break;
                         }
                     }
                     ChannelMsg::ExtendedData { ref data, .. } => {
-                        let chunk = String::from_utf8_lossy(data).to_string();
-                        if app_clone.emit(&event_name, chunk).is_err() {
+                        let chunk = drain_utf8_chunk(&mut utf8_pending, data);
+                        if !chunk.is_empty() && app_clone.emit(&event_name, chunk).is_err() {
                             break;
                         }
                     }
@@ -242,14 +318,15 @@ async fn terminal_open(
 
     std::thread::spawn(move || {
         let mut buf = [0u8; 4096];
+        let mut utf8_pending = Vec::new();
         let mut r = reader;
         let event_name = format!("terminal-data:{}", session_id_clone);
         loop {
             match r.read(&mut buf) {
                 Ok(0) => break,
                 Ok(n) => {
-                    let chunk = String::from_utf8_lossy(&buf[..n]).to_string();
-                    if app_clone.emit(&event_name, chunk).is_err() {
+                    let chunk = drain_utf8_chunk(&mut utf8_pending, &buf[..n]);
+                    if !chunk.is_empty() && app_clone.emit(&event_name, chunk).is_err() {
                         break;
                     }
                 }

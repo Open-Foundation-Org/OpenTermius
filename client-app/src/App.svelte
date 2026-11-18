@@ -679,21 +679,73 @@
     (window as any).AndroidClipboard?.setKeepAliveSessions?.(count);
   });
 
+  const APP_VERSION = '0.4.3';
   type DesktopUpdate = Awaited<ReturnType<typeof import('@tauri-apps/plugin-updater').check>>;
   let availableUpdate = $state<DesktopUpdate | null>(null);
+  let releaseFallback = $state<{ version: string; url: string } | null>(null);
+  let isCheckingUpdate = $state(false);
   let isUpdating = $state(false);
   let updateDismissed = $state(false);
 
-  async function checkDesktopUpdates() {
-    if (platform.isAndroid || !(window as any).__TAURI_INTERNALS__) return;
+  function isNewerSemver(remote: string, current: string): boolean {
+    const r = remote.replace(/^v/i, '').split('.').map((n) => parseInt(n, 10) || 0);
+    const c = current.replace(/^v/i, '').split('.').map((n) => parseInt(n, 10) || 0);
+    for (let i = 0; i < 3; i++) {
+      if ((r[i] || 0) > (c[i] || 0)) return true;
+      if ((r[i] || 0) < (c[i] || 0)) return false;
+    }
+    return false;
+  }
+
+  async function checkDesktopUpdates(manual = false) {
+    if (isCheckingUpdate) return;
+    isCheckingUpdate = true;
     try {
-      const { check } = await import('@tauri-apps/plugin-updater');
-      const update = await check();
-      if (update) {
-        availableUpdate = update;
+      if (!platform.isAndroid && (window as any).__TAURI_INTERNALS__) {
+        try {
+          const { check } = await import('@tauri-apps/plugin-updater');
+          const update = await check();
+          if (update) {
+            availableUpdate = update;
+            updateDismissed = false;
+            if (manual) toast.info(`Update v${update.version} is ready to install.`);
+            return;
+          }
+        } catch {
+          // Fallback to GitHub Releases API check below
+        }
+      }
+
+      const res = await fetch('https://api.github.com/repos/wisnu-w/OpenTermius/releases/latest');
+      if (res.ok) {
+        const data = await res.json();
+        const remoteVer = String(data.tag_name || '').replace(/^v/i, '');
+        if (remoteVer && isNewerSemver(remoteVer, APP_VERSION)) {
+          const assets: Array<{ name: string; browser_download_url: string }> = Array.isArray(data.assets) ? data.assets : [];
+          let targetAsset = data.html_url || 'https://github.com/wisnu-w/OpenTermius/releases/latest';
+          if (platform.isAndroid) {
+            targetAsset = assets.find((a) => a.name.endsWith('.apk'))?.browser_download_url || targetAsset;
+          } else if (platform.isMac) {
+            targetAsset = assets.find((a) => a.name.endsWith('.dmg'))?.browser_download_url || targetAsset;
+          } else {
+            targetAsset = assets.find((a) => a.name.endsWith('.exe'))?.browser_download_url || targetAsset;
+          }
+          releaseFallback = { version: remoteVer, url: targetAsset };
+          updateDismissed = false;
+          if (manual) toast.info(`Update v${remoteVer} is available!`);
+          return;
+        }
+      }
+
+      if (manual) {
+        toast.success(`You are on the latest version (v${APP_VERSION}).`);
       }
     } catch {
-      // Silent fallback when offline or latest.json is not published yet
+      if (manual) {
+        toast.error('Could not check for updates. Check your internet connection.');
+      }
+    } finally {
+      isCheckingUpdate = false;
     }
   }
 
@@ -785,23 +837,35 @@
 
   <!-- Main Viewport Area -->
   <main class="flex flex-1 flex-col min-w-0 min-h-0 overflow-hidden">
-    {#if availableUpdate && !updateDismissed}
+    {#if (availableUpdate || releaseFallback) && !updateDismissed}
+      {@const targetVersion = availableUpdate?.version || releaseFallback?.version}
       <div class="flex items-center justify-between gap-3 border-b border-emerald-500/30 bg-emerald-500/10 px-4 py-2 text-xs text-emerald-100 shrink-0">
         <div class="flex items-center gap-2 min-w-0">
           <Sparkles class="h-3.5 w-3.5 text-emerald-400 shrink-0" />
           <span class="truncate">
-            Update <strong class="font-mono text-emerald-300">v{availableUpdate.version}</strong> is ready to install.
+            Update <strong class="font-mono text-emerald-300">v{targetVersion}</strong> is ready to install.
           </span>
         </div>
         <div class="flex items-center gap-2 shrink-0">
-          <button
-            type="button"
-            disabled={isUpdating}
-            onclick={installDesktopUpdate}
-            class="rounded-md bg-emerald-500 px-2.5 py-1 font-medium text-neutral-950 hover:bg-emerald-400 disabled:opacity-50"
-          >
-            {isUpdating ? 'Updating...' : 'Update & Restart'}
-          </button>
+          {#if availableUpdate}
+            <button
+              type="button"
+              disabled={isUpdating}
+              onclick={installDesktopUpdate}
+              class="rounded-md bg-emerald-500 px-2.5 py-1 font-medium text-neutral-950 hover:bg-emerald-400 disabled:opacity-50"
+            >
+              {isUpdating ? 'Updating...' : 'Update & Restart'}
+            </button>
+          {:else if releaseFallback}
+            <a
+              href={releaseFallback.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              class="rounded-md bg-emerald-500 px-2.5 py-1 font-medium text-neutral-950 hover:bg-emerald-400"
+            >
+              Download v{releaseFallback.version}
+            </a>
+          {/if}
           <button
             type="button"
             disabled={isUpdating}
@@ -1677,8 +1741,19 @@
                 class="w-full rounded-lg border border-[#252535] bg-[#0d0d12] px-3 py-2 font-mono text-neutral-200 outline-none focus:border-emerald-500"
               />
             </div>
-            <div class="pt-2 border-t border-[#20202c] flex items-center justify-between">
-              <span class="text-neutral-400 font-mono text-[11px]">OpenTermius v0.4.3</span>
+            <div class="pt-2 border-t border-[#20202c] flex items-center justify-between gap-2">
+              <div class="flex items-center gap-2.5">
+                <span class="text-neutral-400 font-mono text-[11px]">OpenTermius v{APP_VERSION}</span>
+                <button
+                  type="button"
+                  disabled={isCheckingUpdate}
+                  onclick={() => checkDesktopUpdates(true)}
+                  class="inline-flex items-center gap-1 rounded-md border border-[#282838] bg-[#161620] px-2 py-1 text-[11px] font-medium text-emerald-400 hover:bg-[#1e1e2c] disabled:opacity-50 transition"
+                >
+                  <RefreshCw class="h-3 w-3 {isCheckingUpdate ? 'animate-spin' : ''}" />
+                  <span>{isCheckingUpdate ? 'Checking...' : 'Check for Updates'}</span>
+                </button>
+              </div>
               <button
                 type="button"
                 onclick={handleSignOut}
