@@ -20,12 +20,15 @@ cd "$(dirname "$0")/.."
 MODE="${1:-debug}"
 
 if [ "$MODE" = "release" ]; then
-  echo "Building signed/release Android APK..."
-  npx tauri android build --apk
+  echo "Building signed/release Android APK & Play Store AAB..."
+  npx tauri android build --apk --aab
+elif [ "$MODE" = "aab" ]; then
+  echo "Building signed Play Store Android App Bundle (.aab)..."
+  npx tauri android build --aab
 else
   echo "Building debug Android APK..."
   npx tauri android build --debug
 fi
 
-echo "✓ Android APK build complete!"
-find src-tauri/gen/android/app/build/outputs/apk -name "*.apk" 2>/dev/null
+echo "✓ Android build complete!"
+find src-tauri/gen/android/app/build/outputs -name "*.apk" -o -name "*.aab" 2>/dev/null

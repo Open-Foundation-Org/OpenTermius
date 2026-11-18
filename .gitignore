@@ -25,6 +25,10 @@ build/
 .gradle/
 client-app/src-tauri/gen/android/.gradle/
 client-app/src-tauri/gen/android/app/build/
+client-app/src-tauri/gen/android/keystore.properties
+keystore.properties
+*.jks
+*.keystore
 *.apk
 *.aab
 *.dmg
