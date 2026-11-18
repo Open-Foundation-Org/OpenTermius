@@ -47,15 +47,21 @@ When releasing new client-app changes, ALWAYS bump the version and publish a new
    - `client-app/src-tauri/Cargo.toml`
    - `client-app/scripts/build-dmg.sh` (`DMG_NAME`)
    - `client-app/src/App.svelte` (Settings version label)
-2. **Build Artifacts:**
+   - `site/index.html` (version badge, CTA, download heading)
+2. **Build Artifacts Locally (keep `CLOUD-AGENT-AI` runner for GitHub Pages only):**
+   - Export Tauri updater signing key before desktop builds:
+     `export TAURI_SIGNING_PRIVATE_KEY="$HOME/.tauri/opentermius.key"`
    - Android universal release APK: `cd client-app && ./scripts/build-apk.sh release`
-   - macOS `aarch64` DMG: `cd client-app && ./scripts/build-dmg.sh`
+   - macOS `aarch64` DMG (+ `.app.tar.gz` & `.sig`): `cd client-app && ./scripts/build-dmg.sh`
+   - Windows x64 NSIS `.exe` (+ `.sig`):
+     `export PATH="/opt/homebrew/opt/lld/bin:/opt/homebrew/opt/llvm/bin:$PATH" && cd client-app && npx tauri build --runner cargo-xwin --target x86_64-pc-windows-msvc --bundles nsis`
 3. **Tag & Publish Release:**
    - Commit & push to `main`: `git commit -m "chore(release): bump version to X.Y.Z" && git tag vX.Y.Z && git push origin main vX.Y.Z`
-   - Create GitHub Release with both assets, and ALWAYS include the macOS Gatekeeper Note (`xattr -cr /Applications/OpenTermius.app`) in `--notes`:
+   - Generate `latest.json` (with `darwin-aarch64` and `windows-x86_64` URLs + `.sig` signatures) and create GitHub Release with APK, DMG, EXE, updater bundles/sigs, and `latest.json`. ALWAYS include the macOS Gatekeeper Note (`xattr -cr /Applications/OpenTermius.app`) in `--notes`:
      ```bash
      gh release create vX.Y.Z \
        "client-app/src-tauri/gen/android/app/build/outputs/apk/universal/release/app-universal-release.apk#OpenTermius_X.Y.Z_android_universal.apk" \
        "client-app/src-tauri/target/release/bundle/dmg/OpenTermius_X.Y.Z_aarch64.dmg#OpenTermius_X.Y.Z_macOS_aarch64.dmg" \
+       "client-app/src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/opentermius_X.Y.Z_x64-setup.exe#OpenTermius_X.Y.Z_windows_x64-setup.exe" \
        --title "OpenTermius vX.Y.Z"
      ```
