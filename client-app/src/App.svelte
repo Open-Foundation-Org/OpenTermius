@@ -668,8 +668,40 @@
     (window as any).AndroidClipboard?.setKeepAliveSessions?.(count);
   });
 
+  type DesktopUpdate = Awaited<ReturnType<typeof import('@tauri-apps/plugin-updater').check>>;
+  let availableUpdate = $state<DesktopUpdate | null>(null);
+  let isUpdating = $state(false);
+  let updateDismissed = $state(false);
+
+  async function checkDesktopUpdates() {
+    if (platform.isAndroid || !(window as any).__TAURI_INTERNALS__) return;
+    try {
+      const { check } = await import('@tauri-apps/plugin-updater');
+      const update = await check();
+      if (update) {
+        availableUpdate = update;
+      }
+    } catch {
+      // Silent fallback when offline or latest.json is not published yet
+    }
+  }
+
+  async function installDesktopUpdate() {
+    if (!availableUpdate || isUpdating) return;
+    isUpdating = true;
+    try {
+      await availableUpdate.downloadAndInstall();
+      const { relaunch } = await import('@tauri-apps/plugin-process');
+      await relaunch();
+    } catch (e) {
+      toast.error(`Update failed: ${formatErrorMessage(e)}`);
+      isUpdating = false;
+    }
+  }
+
   onMount(() => {
     checkAuthAndLoadData();
+    void checkDesktopUpdates();
     const unsubSync = api.onSyncComplete((count) => {
       toast.success(`Synced ${count} offline change(s) to Gateway.`);
       void loadHosts();
@@ -741,6 +773,35 @@
 
   <!-- Main Viewport Area -->
   <main class="flex flex-1 flex-col min-w-0 min-h-0 overflow-hidden">
+    {#if availableUpdate && !updateDismissed}
+      <div class="flex items-center justify-between gap-3 border-b border-emerald-500/30 bg-emerald-500/10 px-4 py-2 text-xs text-emerald-100 shrink-0">
+        <div class="flex items-center gap-2 min-w-0">
+          <Sparkles class="h-3.5 w-3.5 text-emerald-400 shrink-0" />
+          <span class="truncate">
+            Update <strong class="font-mono text-emerald-300">v{availableUpdate.version}</strong> is ready to install.
+          </span>
+        </div>
+        <div class="flex items-center gap-2 shrink-0">
+          <button
+            type="button"
+            disabled={isUpdating}
+            onclick={installDesktopUpdate}
+            class="rounded-md bg-emerald-500 px-2.5 py-1 font-medium text-neutral-950 hover:bg-emerald-400 disabled:opacity-50"
+          >
+            {isUpdating ? 'Updating...' : 'Update & Restart'}
+          </button>
+          <button
+            type="button"
+            disabled={isUpdating}
+            onclick={() => (updateDismissed = true)}
+            class="rounded-md px-2 py-1 text-neutral-400 hover:text-neutral-200"
+          >
+            Later
+          </button>
+        </div>
+      </div>
+    {/if}
+
     <!-- Top Header & Tabs Bar -->
     {#if platform.isMobile}
       {@const navTitles: Record<string, string> = {
