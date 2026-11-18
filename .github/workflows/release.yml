@@ -1,13 +1,10 @@
 name: Build & Release (Self-Hosted)
 
 on:
-  push:
-    tags:
-      - 'v*'
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Release tag to build & attach assets to (e.g. v0.4.1)'
+        description: 'Release tag to build & attach assets to (e.g. v0.4.2)'
         required: true
 
 permissions:
