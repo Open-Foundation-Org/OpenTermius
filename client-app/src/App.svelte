@@ -1602,7 +1602,7 @@
               />
             </div>
             <div class="pt-2 border-t border-[#20202c] flex items-center justify-between">
-              <span class="text-neutral-400 font-mono text-[11px]">OpenTermius v0.4.1</span>
+              <span class="text-neutral-400 font-mono text-[11px]">OpenTermius v0.4.2</span>
               <button
                 type="button"
                 onclick={handleSignOut}
