@@ -8,7 +8,7 @@ set -euo pipefail
 REPO_URL="${OPENTERMIUS_REPO:-https://github.com/wisnu-w/OpenTermius.git}"
 INSTALL_DIR="${OPENTERMIUS_DIR:-$HOME/opentermius}"
 GO_REQUIRED_MINOR=24
-GO_INSTALL_VERSION="1.24.2"
+GO_FALLBACK_VERSION="1.27.4"
 
 log()  { printf "\033[1;34m[OpenTermius]\033[0m %s\n" "$*"; }
 ok()   { printf "\033[1;32m[OK]\033[0m %s\n" "$*"; }
@@ -76,11 +76,15 @@ install_go_tarball() {
       ok "Go $current_ver already installed"
       return
     fi
-    warn "Go $current_ver is older than 1.${GO_REQUIRED_MINOR}; upgrading to $GO_INSTALL_VERSION..."
+    warn "Go $current_ver is older than 1.${GO_REQUIRED_MINOR}; upgrading to latest stable..."
   fi
 
-  local url="https://go.dev/dl/go${GO_INSTALL_VERSION}.linux-${GO_ARCH}.tar.gz"
-  log "Downloading Go ${GO_INSTALL_VERSION} (${GO_ARCH})..."
+  local go_ver
+  go_ver="$(curl -fsSL "https://go.dev/VERSION?m=text" 2>/dev/null | head -n 1 | sed 's/^go//' || true)"
+  [ -z "$go_ver" ] && go_ver="$GO_FALLBACK_VERSION"
+
+  local url="https://go.dev/dl/go${go_ver}.linux-${GO_ARCH}.tar.gz"
+  log "Downloading Go ${go_ver} (${GO_ARCH})..."
   curl -fsSL "$url" -o /tmp/go.tar.gz
   as_root rm -rf /usr/local/go
   as_root tar -C /usr/local -xzf /tmp/go.tar.gz
@@ -96,7 +100,7 @@ install_node_linux() {
   if command -v node >/dev/null 2>&1; then
     local nver
     nver="$(node -v | sed 's/^v//')"
-    if version_ge "$nver" "20.0"; then
+    if version_ge "$nver" "24.0"; then
       ok "Node.js v$nver already installed"
       return
     fi
@@ -104,13 +108,13 @@ install_node_linux() {
 
   case "$PLATFORM" in
     debian)
-      log "Installing Node.js 22 LTS via NodeSource..."
-      curl -fsSL https://deb.nodesource.com/setup_22.x | as_root bash -
+      log "Installing Node.js 24 LTS via NodeSource..."
+      curl -fsSL https://deb.nodesource.com/setup_24.x | as_root bash -
       as_root apt-get install -y nodejs
       ;;
     fedora|rhel)
-      log "Installing Node.js 22 LTS via NodeSource..."
-      curl -fsSL https://rpm.nodesource.com/setup_22.x | as_root bash -
+      log "Installing Node.js 24 LTS via NodeSource..."
+      curl -fsSL https://rpm.nodesource.com/setup_24.x | as_root bash -
       if [ "$PLATFORM" = "fedora" ]; then
         as_root dnf install -y nodejs
       else
@@ -151,7 +155,7 @@ install_deps_macos() {
   brew install go node git openssl@3
 
   if postgres_already_running; then
-    ok "Existing PostgreSQL detected on port ${PGPORT:-5432} (skipping postgresql@16 install/start)"
+    ok "Existing PostgreSQL detected on port ${PGPORT:-5432} (skipping PostgreSQL install/start)"
     if ! command -v psql >/dev/null 2>&1; then
       brew install libpq
       export PATH="$(brew --prefix libpq)/bin:$PATH"
@@ -159,11 +163,11 @@ install_deps_macos() {
   elif command -v psql >/dev/null 2>&1; then
     ok "PostgreSQL client already installed: $(psql --version)"
   else
-    log "Installing PostgreSQL@16 via Homebrew..."
-    brew install postgresql@16
-    brew services start postgresql@16 || true
+    log "Installing latest PostgreSQL via Homebrew..."
+    brew install postgresql
+    brew services start postgresql || true
     local pg_bin
-    pg_bin="$(brew --prefix postgresql@16)/bin"
+    pg_bin="$(brew --prefix postgresql)/bin"
     export PATH="$pg_bin:$PATH"
     if ! grep -q "$pg_bin" "$HOME/.zshrc" 2>/dev/null; then
       echo "export PATH=\"$pg_bin:\$PATH\"" >> "$HOME/.zshrc"

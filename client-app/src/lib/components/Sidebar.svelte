@@ -14,7 +14,7 @@
     Network,
     PanelLeftClose,
     Folder
-  } from 'lucide-svelte';
+  } from '@lucide/svelte';
   import { api, type ApiVault } from '../api/client';
   import { platform } from '../stores/platform.svelte';
 

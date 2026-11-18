@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { X, Server, ChevronDown, ChevronRight, Radio, Network } from 'lucide-svelte';
+  import { X, Server, ChevronDown, ChevronRight, Radio, Network } from '@lucide/svelte';
   import { api } from '../api/client';
   import { decryptVaultPayload } from '../crypto/vault';
 

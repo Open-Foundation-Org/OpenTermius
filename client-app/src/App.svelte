@@ -58,7 +58,7 @@
     ScrollText,
     Settings,
     LayoutGrid
-  } from 'lucide-svelte';
+  } from '@lucide/svelte';
 
   // Svelte 5 Runes State
   let activeNav = $state('hosts');

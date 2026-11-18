@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { X, FolderInput, Folder, Users, FolderLock, ArrowRight, Check } from 'lucide-svelte';
+  import { X, FolderInput, Folder, Users, FolderLock, ArrowRight, Check } from '@lucide/svelte';
   import type { ApiVault } from '../api/client';
 
   interface Props {

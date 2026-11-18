@@ -3,7 +3,7 @@
   import { platform } from '../stores/platform.svelte';
   import { toast } from '../stores/toast.svelte';
   import SftpPane, { type SftpHostItem } from './SftpPane.svelte';
-  import { ArrowRight, ArrowLeft, Copy, Scissors } from 'lucide-svelte';
+  import { ArrowRight, ArrowLeft, Copy, Scissors } from '@lucide/svelte';
 
   interface Props {
     hosts: SftpHostItem[];

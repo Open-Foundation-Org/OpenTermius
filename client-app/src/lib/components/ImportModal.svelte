@@ -7,7 +7,7 @@
     AlertCircle,
     Server,
     Download
-  } from 'lucide-svelte';
+  } from '@lucide/svelte';
 
   interface ParsedHost {
     label: string;

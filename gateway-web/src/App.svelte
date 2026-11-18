@@ -26,7 +26,7 @@
     FolderPlus,
     Menu,
     X
-  } from 'lucide-svelte';
+  } from '@lucide/svelte';
 
   // Navigation & Screen State
   let activeTab = $state<'overview' | 'users' | 'teams' | 'audit' | 'settings'>('overview');

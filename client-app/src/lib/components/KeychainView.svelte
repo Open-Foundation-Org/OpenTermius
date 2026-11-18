@@ -17,7 +17,7 @@
     FileKey,
     Download,
     X
-  } from 'lucide-svelte';
+  } from '@lucide/svelte';
 
   interface Props {
     activeVaultId?: string;

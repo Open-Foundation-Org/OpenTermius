@@ -3,7 +3,7 @@
   import { api, type ApiVaultItem, type ApiVault } from '../api/client';
   import { toast, formatErrorMessage } from '../stores/toast.svelte';
   import { encryptVaultPayload, decryptVaultPayload } from '../crypto/vault';
-  import { FileCode2, Play, Plus, RefreshCw, AlertCircle, Sparkles } from 'lucide-svelte';
+  import { FileCode2, Play, Plus, RefreshCw, AlertCircle, Sparkles } from '@lucide/svelte';
 
   interface Props {
     activeVaultId?: string;

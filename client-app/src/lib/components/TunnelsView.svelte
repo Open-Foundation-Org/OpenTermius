@@ -10,7 +10,7 @@
     Check,
     ArrowRight,
     Globe
-  } from 'lucide-svelte';
+  } from '@lucide/svelte';
   import { api } from '../api/client';
 
   interface TunnelConfig {

@@ -15,7 +15,7 @@
     X,
     User,
     Check
-  } from 'lucide-svelte';
+  } from '@lucide/svelte';
 
   interface Props {
     activeVaultId?: string;

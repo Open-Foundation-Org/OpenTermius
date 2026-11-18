@@ -9,7 +9,7 @@
     MoreVertical,
     Copy,
     ArrowUpRight
-  } from 'lucide-svelte';
+  } from '@lucide/svelte';
   import { platform } from '../stores/platform.svelte';
   import { toast } from '../stores/toast.svelte';
 

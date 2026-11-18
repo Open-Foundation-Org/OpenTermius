@@ -14,7 +14,7 @@
     Check,
     X,
     Shield
-  } from 'lucide-svelte';
+  } from '@lucide/svelte';
 
   interface Props {
     activeVault?: ApiVault | null;

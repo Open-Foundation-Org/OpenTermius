@@ -19,7 +19,7 @@
     MoreVertical,
     Maximize2,
     Minimize2
-  } from 'lucide-svelte';
+  } from '@lucide/svelte';
 
   interface Props {
     title: string;

@@ -19,7 +19,7 @@
     X,
     Laptop,
     Check
-  } from 'lucide-svelte';
+  } from '@lucide/svelte';
 
   export interface SftpHostItem {
     id: string;

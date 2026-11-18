@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { ScrollText, Clock, Server, RefreshCw, Trash2, Copy, Check, AlertCircle } from 'lucide-svelte';
+  import { ScrollText, Clock, Server, RefreshCw, Trash2, Copy, Check, AlertCircle } from '@lucide/svelte';
   import { toast, formatErrorMessage } from '../stores/toast.svelte';
 
   interface SessionLogItem {
