@@ -62,3 +62,4 @@ All encryption and decryption occurs in client memory using WebCrypto APIs (`win
 - [x] **No Hardcoded Secrets:** Zero hardcoded API keys, secrets, or default passwords.
 - [x] **CSRF / CORS Protection:** Explicit origin validation for WebSockets and API endpoints.
 - [x] **Rate Limiting:** Authentication endpoints are rate-limited to prevent brute-force attacks.
+- [x] **SSH Host Key Verification (TOFU):** Native Rust `russh` client verifies and persists server host key fingerprints (`~/.opentermius_known_hosts.json`) on first connection and rejects mismatched host keys to prevent MITM attacks.
