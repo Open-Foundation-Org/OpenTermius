@@ -303,10 +303,10 @@
         type="button"
         onclick={() => (isNewFolderOpen = true)}
         disabled={!targetId}
-        class="flex h-7 w-7 items-center justify-center rounded-lg border border-[#242432] bg-[#171720] text-neutral-300 hover:text-white disabled:opacity-40 transition"
+        class="flex h-9 w-9 sm:h-7 sm:w-7 items-center justify-center rounded-lg border border-[#242432] bg-[#171720] text-neutral-300 hover:text-white disabled:opacity-40 transition"
         title="New Folder"
       >
-        <FolderPlus class="h-3.5 w-3.5" />
+        <FolderPlus class="h-4 w-4 sm:h-3.5 sm:w-3.5" />
       </button>
 
       <input
@@ -320,20 +320,20 @@
         type="button"
         onclick={() => fileInputRef?.click()}
         disabled={!targetId || isUploading}
-        class="flex h-7 w-7 items-center justify-center rounded-lg border border-[#242432] bg-[#171720] text-neutral-300 hover:text-white disabled:opacity-40 transition"
+        class="flex h-9 w-9 sm:h-7 sm:w-7 items-center justify-center rounded-lg border border-[#242432] bg-[#171720] text-neutral-300 hover:text-white disabled:opacity-40 transition"
         title="Upload from OS Picker"
       >
-        <Upload class="h-3.5 w-3.5" />
+        <Upload class="h-4 w-4 sm:h-3.5 sm:w-3.5" />
       </button>
 
       <button
         type="button"
         onclick={() => loadDirectory(currentPath)}
         disabled={!targetId || loadState === 'loading'}
-        class="flex h-7 w-7 items-center justify-center rounded-lg border border-[#242432] bg-[#171720] text-neutral-300 hover:text-white disabled:opacity-40 transition"
+        class="flex h-9 w-9 sm:h-7 sm:w-7 items-center justify-center rounded-lg border border-[#242432] bg-[#171720] text-neutral-300 hover:text-white disabled:opacity-40 transition"
         title="Refresh"
       >
-        <RefreshCw class="h-3.5 w-3.5 {loadState === 'loading' ? 'animate-spin' : ''}" />
+        <RefreshCw class="h-4 w-4 sm:h-3.5 sm:w-3.5 {loadState === 'loading' ? 'animate-spin' : ''}" />
       </button>
     </div>
   </div>
@@ -344,10 +344,10 @@
       type="button"
       onclick={handleNavigateUp}
       disabled={!currentPath || currentPath === '/' || loadState === 'loading'}
-      class="flex h-7 w-7 items-center justify-center rounded-md border border-[#242432] bg-[#16161f] text-neutral-300 hover:text-white disabled:opacity-40 transition shrink-0"
+      class="flex h-8 w-8 sm:h-7 sm:w-7 items-center justify-center rounded-md border border-[#242432] bg-[#16161f] text-neutral-300 hover:text-white disabled:opacity-40 transition shrink-0"
       title="Up Directory"
     >
-      <CornerLeftUp class="h-3.5 w-3.5" />
+      <CornerLeftUp class="h-4 w-4 sm:h-3.5 sm:w-3.5" />
     </button>
 
     <form onsubmit={handlePathSubmit} class="flex-1 min-w-0">
@@ -355,17 +355,23 @@
         type="text"
         bind:value={pathInputValue}
         placeholder="/path"
-        class="w-full rounded-md border border-[#242432] bg-[#0a0a0e] px-2.5 py-1 text-[11px] font-mono text-neutral-200 outline-none focus:border-emerald-500/60"
+        autocapitalize="none"
+        autocorrect="off"
+        spellcheck={false}
+        class="w-full rounded-md border border-[#242432] bg-[#0a0a0e] px-2.5 py-1.5 sm:py-1 text-xs sm:text-[11px] font-mono text-neutral-200 outline-none focus:border-emerald-500/60"
       />
     </form>
 
-    <div class="relative w-32 shrink-0 hidden sm:block">
+    <div class="relative w-28 sm:w-32 shrink-0">
       <Search class="absolute left-2 top-1/2 -translate-y-1/2 h-3 w-3 text-neutral-500" />
       <input
         type="text"
         bind:value={searchQuery}
         placeholder="Filter..."
-        class="w-full rounded-md border border-[#242432] bg-[#0a0a0e] pl-6 pr-2 py-1 text-[11px] text-neutral-200 outline-none focus:border-emerald-500/60"
+        autocapitalize="none"
+        autocorrect="off"
+        spellcheck={false}
+        class="w-full rounded-md border border-[#242432] bg-[#0a0a0e] pl-6 pr-2 py-1.5 sm:py-1 text-xs sm:text-[11px] text-neutral-200 outline-none focus:border-emerald-500/60"
       />
     </div>
   </div>
@@ -403,13 +409,13 @@
               <button
                 type="button"
                 onclick={() => toggleSelect(item)}
-                class="flex h-5 w-5 shrink-0 items-center justify-center rounded border transition {isSelected ? 'border-emerald-500 bg-emerald-500 text-black' : 'border-[#323244] bg-[#0c0c11] text-transparent'}"
+                class="flex h-6 w-6 shrink-0 items-center justify-center rounded border transition {isSelected ? 'border-emerald-500 bg-emerald-500 text-black' : 'border-[#323244] bg-[#0c0c11] text-transparent'}"
                 aria-label="Select file"
               >
                 <Check class="h-3.5 w-3.5" />
               </button>
             {:else}
-              <div class="w-5 shrink-0"></div>
+              <div class="w-6 shrink-0"></div>
             {/if}
 
             <button

@@ -154,6 +154,10 @@
   }
 
   function stopRelay() {
+    for (const timer of typingTimers.values()) {
+      clearTimeout(timer);
+    }
+    typingTimers.clear();
     if (relayWs) {
       try { relayWs.close(); } catch {}
       relayWs = null;
@@ -555,7 +559,10 @@
     }
   });
 
+  let connSeq = 0;
+
   async function connectNative() {
+    const mySeq = ++connSeq;
     connectionState = 'connecting';
     errorMessage = null;
 
@@ -571,6 +578,7 @@
       unlistenExit?.();
 
       unlistenData = await listen<string>(`terminal-data:${activeSessionId}`, (event) => {
+        if (mySeq !== connSeq) return;
         term?.write(event.payload);
         if (relayWs && relayWs.readyState === WebSocket.OPEN && isRelaySharing) {
           relayWs.send(relayEncoder.encode(event.payload));
@@ -578,8 +586,10 @@
       });
 
       unlistenExit = await listen(`terminal-exit:${activeSessionId}`, () => {
+        if (mySeq !== connSeq) return;
         connectionState = 'disconnected';
         term?.writeln('\r\n\x1b[1;31mSession disconnected.\x1b[0m\r\n');
+        invoke('terminal_close', { sessionId: activeSessionId }).catch(() => {});
       });
 
       const cols = term?.cols && term.cols > 0 ? term.cols : 80;
@@ -613,6 +623,7 @@
 
     term = new Terminal({
       cursorBlink: true,
+      scrollback: platform.isMobile ? 1500 : 5000,
       fontFamily: 'Menlo, Monaco, "Courier New", monospace',
       fontSize,
       lineHeight: 1.25,

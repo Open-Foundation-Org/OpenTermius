@@ -233,6 +233,9 @@
               type="text"
               bind:value={address}
               placeholder="192.168.1.10 or server.com"
+              autocapitalize="none"
+              autocorrect="off"
+              spellcheck={false}
               class="w-full rounded-xl border border-[#252535] bg-[#0e0e14] px-3.5 py-3 sm:py-2.5 font-mono text-base sm:text-xs text-white placeholder-neutral-500 outline-none focus:border-emerald-500"
               required
             />
@@ -242,6 +245,7 @@
             <input
               id="host-port"
               type="number"
+              inputmode="numeric"
               bind:value={port}
               class="w-full rounded-xl border border-[#252535] bg-[#0e0e14] px-3 py-3 sm:py-2.5 font-mono text-base sm:text-xs text-white outline-none focus:border-emerald-500"
               required
@@ -256,6 +260,9 @@
             type="text"
             bind:value={username}
             placeholder="root / ubuntu"
+            autocapitalize="none"
+            autocorrect="off"
+            spellcheck={false}
             class="w-full rounded-xl border border-[#252535] bg-[#0e0e14] px-3.5 py-3 sm:py-2.5 font-mono text-base sm:text-xs text-white placeholder-neutral-500 outline-none focus:border-emerald-500"
             required
           />

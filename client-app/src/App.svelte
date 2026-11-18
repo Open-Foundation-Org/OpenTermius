@@ -571,17 +571,25 @@
     toast.success(`Rejoined ${hostLabel} (${mode})`);
   }
 
+  let remotePollTimer: ReturnType<typeof setInterval> | null = null;
+
   async function handleRequestRemote(sessionId: string, hostLabel: string, ownerName: string, mode: 'view' | 'control') {
     try {
       const req = await api.requestRemoteSession(sessionId, mode);
       pendingOutboundRequestId = req.id;
       toast.info(`Requested ${mode} access to ${hostLabel}. Waiting for ${ownerName}...`);
 
+      if (remotePollTimer) {
+        clearInterval(remotePollTimer);
+        remotePollTimer = null;
+      }
+
       let attempts = 0;
       const poll = setInterval(async () => {
         attempts++;
         if (attempts > 40 || pendingOutboundRequestId !== req.id) {
           clearInterval(poll);
+          if (remotePollTimer === poll) remotePollTimer = null;
           if (pendingOutboundRequestId === req.id) pendingOutboundRequestId = null;
           return;
         }
@@ -589,6 +597,7 @@
           const latest = await api.getRemoteRequest(req.id);
           if (latest.status === 'approved') {
             clearInterval(poll);
+            if (remotePollTimer === poll) remotePollTimer = null;
             pendingOutboundRequestId = null;
             terminalStore.openTab(
               `remote-${latest.session_id}`,
@@ -608,6 +617,7 @@
             toast.success(`Connected to ${latest.host_label} (${latest.mode})`);
           } else if (latest.status === 'rejected') {
             clearInterval(poll);
+            if (remotePollTimer === poll) remotePollTimer = null;
             pendingOutboundRequestId = null;
             toast.error('Remote access request declined');
           }
@@ -615,6 +625,7 @@
           // ignore transient poll error
         }
       }, 1500);
+      remotePollTimer = poll;
     } catch (err: unknown) {
       toast.error(err, 'Failed to request remote access');
     }
@@ -747,6 +758,7 @@
       unsubSync();
       clearInterval(syncTimer);
       clearInterval(heartbeatTimer);
+      if (remotePollTimer) clearInterval(remotePollTimer);
       window.removeEventListener('focus', onFocus);
       window.removeEventListener('opentermius:android-back', onAndroidBack);
     };
@@ -1656,14 +1668,17 @@
               <label for="cfg-backend-url" class="block font-medium text-neutral-300 mb-1">Self-Hosted Gateway URL</label>
               <input
                 id="cfg-backend-url"
-                type="text"
+                type="url"
+                autocapitalize="none"
+                autocorrect="off"
+                spellcheck={false}
                 bind:value={gatewayApiUrl}
                 onchange={() => api.setGateway(gatewayApiUrl)}
                 class="w-full rounded-lg border border-[#252535] bg-[#0d0d12] px-3 py-2 font-mono text-neutral-200 outline-none focus:border-emerald-500"
               />
             </div>
             <div class="pt-2 border-t border-[#20202c] flex items-center justify-between">
-              <span class="text-neutral-400 font-mono text-[11px]">OpenTermius v0.4.2</span>
+              <span class="text-neutral-400 font-mono text-[11px]">OpenTermius v0.4.3</span>
               <button
                 type="button"
                 onclick={handleSignOut}
@@ -1681,7 +1696,10 @@
     <!-- Mobile Bottom Navigation Bar (Flex child at bottom of main — never overlaps terminal/special keys) -->
     {#if isAuthenticated && platform.isMobile && !hideMobileBottomNav}
       {@const isMoreActive = ['more', 'vaults', 'keychain', 'identities', 'snippets', 'logs', 'settings'].includes(activeNav)}
-      <nav class="shrink-0 h-16 bg-[#0e0e14]/95 backdrop-blur-md border-t border-[#1f1f2a] flex items-center justify-around z-30 px-1 select-none">
+      <nav
+        class="shrink-0 min-h-16 bg-[#0e0e14]/95 backdrop-blur-md border-t border-[#1f1f2a] flex items-center justify-around z-30 px-1 select-none"
+        style="padding-bottom: env(safe-area-inset-bottom);"
+      >
         <button
           type="button"
           onclick={() => (activeNav = 'hosts')}

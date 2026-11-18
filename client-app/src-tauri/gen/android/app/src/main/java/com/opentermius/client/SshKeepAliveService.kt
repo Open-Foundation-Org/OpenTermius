@@ -32,7 +32,11 @@ class SshKeepAliveService : Service() {
   }
 
   override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-    val count = intent?.getIntExtra(EXTRA_SESSION_COUNT, 1) ?: 1
+    if (intent == null) {
+      releaseAndStop()
+      return START_NOT_STICKY
+    }
+    val count = intent.getIntExtra(EXTRA_SESSION_COUNT, 0)
     if (count <= 0) {
       releaseAndStop()
       return START_NOT_STICKY
@@ -48,7 +52,11 @@ class SshKeepAliveService : Service() {
     } else {
       startForeground(NOTIFICATION_ID, notification)
     }
-    return START_STICKY
+    return START_NOT_STICKY
+  }
+
+  override fun onTimeout(startId: Int, fgsType: Int) {
+    releaseAndStop()
   }
 
   private fun buildNotification(count: Int): Notification {

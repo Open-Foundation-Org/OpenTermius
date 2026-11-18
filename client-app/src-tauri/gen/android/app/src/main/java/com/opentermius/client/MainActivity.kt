@@ -55,14 +55,18 @@ class AndroidClipboardBridge(private val activity: Activity) {
       val intent = Intent(activity, SshKeepAliveService::class.java).apply {
         putExtra(SshKeepAliveService.EXTRA_SESSION_COUNT, count)
       }
-      if (count > 0) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-          activity.startForegroundService(intent)
+      try {
+        if (count > 0) {
+          if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            activity.startForegroundService(intent)
+          } else {
+            activity.startService(intent)
+          }
         } else {
-          activity.startService(intent)
+          activity.stopService(intent)
         }
-      } else {
-        activity.stopService(intent)
+      } catch (_: Exception) {
+        // Avoid ForegroundServiceStartNotAllowedException if session count changes while app is backgrounded
       }
     }
   }

@@ -29,9 +29,10 @@ enum SessionHandle {
     LocalPty {
         writer: Arc<Mutex<Box<dyn Write + Send>>>,
         master: Arc<Mutex<Box<dyn MasterPty + Send>>>,
+        child: Arc<Mutex<Box<dyn portable_pty::Child + Send + Sync>>>,
     },
     RemoteSsh {
-        write_half: ChannelWriteHalf<client::Msg>,
+        write_half: Arc<tokio::sync::Mutex<ChannelWriteHalf<client::Msg>>>,
         session: Arc<tokio::sync::Mutex<client::Handle<SshClientHandler>>>,
     },
 }
@@ -160,6 +161,7 @@ async fn terminal_open(
         let (mut read_half, write_half) = channel.split();
         let session_id_clone = config.session_id.clone();
         let app_clone = app.clone();
+        let sessions_arc = state.sessions.clone();
 
         tauri::async_runtime::spawn(async move {
             let event_name = format!("terminal-data:{}", session_id_clone);
@@ -181,6 +183,7 @@ async fn terminal_open(
                     _ => {}
                 }
             }
+            sessions_arc.lock().await.remove(&session_id_clone);
             let exit_event = format!("terminal-exit:{}", session_id_clone);
             let _ = app_clone.emit(&exit_event, ());
         });
@@ -189,7 +192,7 @@ async fn terminal_open(
         sessions.insert(
             config.session_id,
             SessionHandle::RemoteSsh {
-                write_half,
+                write_half: Arc::new(tokio::sync::Mutex::new(write_half)),
                 session: Arc::new(tokio::sync::Mutex::new(session)),
             },
         );
@@ -226,7 +229,7 @@ async fn terminal_open(
     let mut cmd = CommandBuilder::new(shell);
     cmd.env("TERM", "xterm-256color");
 
-    let _child = pair.slave.spawn_command(cmd).map_err(|e| e.to_string())?;
+    let child = pair.slave.spawn_command(cmd).map_err(|e| e.to_string())?;
     drop(pair.slave);
 
     let reader = pair.master.try_clone_reader().map_err(|e| e.to_string())?;
@@ -263,6 +266,7 @@ async fn terminal_open(
         SessionHandle::LocalPty {
             writer,
             master: Arc::new(Mutex::new(pair.master)),
+            child: Arc::new(Mutex::new(child)),
         },
     );
 
@@ -275,26 +279,31 @@ async fn terminal_write(
     session_id: String,
     data: String,
 ) -> Result<(), String> {
-    let sessions = state.sessions.lock().await;
-    if let Some(session) = sessions.get(&session_id) {
-        match session {
-            SessionHandle::LocalPty { writer, .. } => {
-                let mut w = writer.lock().unwrap();
-                w.write_all(data.as_bytes()).map_err(|e| e.to_string())?;
-                w.flush().map_err(|e| e.to_string())?;
-                Ok(())
-            }
-            SessionHandle::RemoteSsh { write_half, .. } => {
-                write_half
-                    .data(data.as_bytes())
-                    .await
-                    .map_err(|e| e.to_string())?;
-                Ok(())
-            }
+    let target = {
+        let sessions = state.sessions.lock().await;
+        match sessions.get(&session_id) {
+            Some(SessionHandle::LocalPty { writer, .. }) => Ok((Some(writer.clone()), None)),
+            Some(SessionHandle::RemoteSsh { write_half, .. }) => Ok((None, Some(write_half.clone()))),
+            None => Err("Session not found".to_string()),
         }
-    } else {
-        Err("Session not found".to_string())
+    }?;
+
+    if let Some(writer) = target.0 {
+        tokio::task::spawn_blocking(move || {
+            let mut w = writer.lock().map_err(|_| "Terminal writer lock poisoned".to_string())?;
+            w.write_all(data.as_bytes()).map_err(|e| e.to_string())?;
+            w.flush().map_err(|e| e.to_string())
+        })
+        .await
+        .map_err(|e| e.to_string())??;
+        return Ok(());
     }
+
+    if let Some(write_half) = target.1 {
+        let wh = write_half.lock().await;
+        wh.data(data.as_bytes()).await.map_err(|e| e.to_string())?;
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -304,47 +313,65 @@ async fn terminal_resize(
     cols: u16,
     rows: u16,
 ) -> Result<(), String> {
-    let sessions = state.sessions.lock().await;
-    if let Some(session) = sessions.get(&session_id) {
-        match session {
-            SessionHandle::LocalPty { master, .. } => {
-                let m = master.lock().unwrap();
-                m.resize(PtySize {
-                    rows,
-                    cols,
-                    pixel_width: 0,
-                    pixel_height: 0,
-                })
-                .map_err(|e| e.to_string())?;
-                Ok(())
-            }
-            SessionHandle::RemoteSsh { write_half, .. } => {
-                write_half
-                    .window_change(cols as u32, rows as u32, 0, 0)
-                    .await
-                    .map_err(|e| e.to_string())?;
-                Ok(())
-            }
+    let target = {
+        let sessions = state.sessions.lock().await;
+        match sessions.get(&session_id) {
+            Some(SessionHandle::LocalPty { master, .. }) => Ok((Some(master.clone()), None)),
+            Some(SessionHandle::RemoteSsh { write_half, .. }) => Ok((None, Some(write_half.clone()))),
+            None => Err("Session not found".to_string()),
         }
-    } else {
-        Err("Session not found".to_string())
+    }?;
+
+    if let Some(master) = target.0 {
+        let m = master.lock().map_err(|_| "Terminal master lock poisoned".to_string())?;
+        m.resize(PtySize {
+            rows,
+            cols,
+            pixel_width: 0,
+            pixel_height: 0,
+        })
+        .map_err(|e| e.to_string())?;
+        return Ok(());
     }
+
+    if let Some(write_half) = target.1 {
+        let wh = write_half.lock().await;
+        wh.window_change(cols as u32, rows as u32, 0, 0)
+            .await
+            .map_err(|e| e.to_string())?;
+    }
+    Ok(())
 }
 
 #[tauri::command]
 async fn terminal_close(state: State<'_, TerminalState>, session_id: String) -> Result<(), String> {
-    let mut sessions = state.sessions.lock().await;
-    if let Some(handle) = sessions.remove(&session_id) {
-        if let SessionHandle::RemoteSsh {
-            write_half,
-            session,
-        } = handle
-        {
-            let _ = write_half.close().await;
-            let s = session.lock().await;
-            let _ = s
-                .disconnect(Disconnect::ByApplication, "Closed by user", "en")
+    let removed = {
+        let mut sessions = state.sessions.lock().await;
+        sessions.remove(&session_id)
+    };
+    if let Some(handle) = removed {
+        match handle {
+            SessionHandle::LocalPty { child, .. } => {
+                let _ = tokio::task::spawn_blocking(move || {
+                    if let Ok(mut c) = child.lock() {
+                        let _ = c.kill();
+                        let _ = c.wait();
+                    }
+                })
                 .await;
+            }
+            SessionHandle::RemoteSsh {
+                write_half,
+                session,
+            } => {
+                let wh = write_half.lock().await;
+                let _ = wh.close().await;
+                drop(wh);
+                let s = session.lock().await;
+                let _ = s
+                    .disconnect(Disconnect::ByApplication, "Closed by user", "en")
+                    .await;
+            }
         }
     }
     Ok(())
@@ -511,9 +538,22 @@ async fn sftp_delete(config: SftpConnectionConfig, path: String) -> Result<(), S
     Ok(())
 }
 
+const MAX_TRANSFER_BYTES: u64 = 100 * 1024 * 1024; // 100 MB safety cap
+
 #[tauri::command]
 async fn sftp_read_bytes(config: SftpConnectionConfig, path: String) -> Result<Vec<u8>, String> {
     let (_ssh, sftp) = open_sftp_session(&config).await?;
+    let meta = sftp
+        .metadata(&path)
+        .await
+        .map_err(|e| format!("Failed to stat '{}': {}", path, e))?;
+    if meta.len() > MAX_TRANSFER_BYTES {
+        let _ = sftp.close().await;
+        return Err(format!(
+            "File '{}' exceeds 100 MB in-memory transfer limit",
+            path
+        ));
+    }
     let bytes = sftp
         .read(&path)
         .await
@@ -566,100 +606,123 @@ pub struct LocalFsListResult {
 }
 
 #[tauri::command]
-fn local_fs_list(path: String) -> Result<LocalFsListResult, String> {
-    let target = if path.trim().is_empty() {
-        #[cfg(target_os = "android")]
-        let fallback = PathBuf::from("/sdcard");
-        #[cfg(not(target_os = "android"))]
-        let fallback = PathBuf::from("/");
+async fn local_fs_list(path: String) -> Result<LocalFsListResult, String> {
+    tokio::task::spawn_blocking(move || {
+        let target = if path.trim().is_empty() {
+            #[cfg(target_os = "android")]
+            let fallback = PathBuf::from("/sdcard");
+            #[cfg(not(target_os = "android"))]
+            let fallback = PathBuf::from("/");
 
-        std::env::var("HOME")
-            .map(PathBuf::from)
-            .ok()
-            .filter(|p| p.exists())
-            .unwrap_or_else(|| {
-                if fallback.exists() {
-                    fallback
-                } else {
-                    PathBuf::from("/")
-                }
-            })
-    } else {
-        PathBuf::from(path.trim())
-    };
-
-    let canonical = std::fs::canonicalize(&target).unwrap_or(target);
-    let read_dir = std::fs::read_dir(&canonical).map_err(|e| e.to_string())?;
-
-    let mut items = Vec::new();
-    for entry in read_dir.flatten() {
-        let name = entry.file_name().to_string_lossy().to_string();
-        let entry_path = entry.path();
-        let meta = match entry.metadata() {
-            Ok(m) => m,
-            Err(_) => continue,
+            std::env::var("HOME")
+                .map(PathBuf::from)
+                .ok()
+                .filter(|p| p.exists())
+                .unwrap_or_else(|| {
+                    if fallback.exists() {
+                        fallback
+                    } else {
+                        PathBuf::from("/")
+                    }
+                })
+        } else {
+            PathBuf::from(path.trim())
         };
-        let is_dir = meta.is_dir();
-        let size = if is_dir { 0 } else { meta.len() };
-        let mod_secs = meta
-            .modified()
-            .ok()
-            .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
-            .map(|d| d.as_secs())
-            .unwrap_or(0);
-        #[cfg(unix)]
-        let mode = {
-            use std::os::unix::fs::PermissionsExt;
-            format!("{:o}", meta.permissions().mode() & 0o777)
-        };
-        #[cfg(not(unix))]
-        let mode = String::from("644");
 
-        items.push(LocalFsItem {
-            name,
-            path: entry_path.to_string_lossy().to_string(),
-            size,
-            is_dir,
-            mod_time: mod_secs.to_string(),
-            mode,
+        let canonical = std::fs::canonicalize(&target).unwrap_or(target);
+        let read_dir = std::fs::read_dir(&canonical).map_err(|e| e.to_string())?;
+
+        let mut items = Vec::new();
+        for entry in read_dir.flatten() {
+            let name = entry.file_name().to_string_lossy().to_string();
+            let entry_path = entry.path();
+            let meta = match entry.metadata() {
+                Ok(m) => m,
+                Err(_) => continue,
+            };
+            let is_dir = meta.is_dir();
+            let size = if is_dir { 0 } else { meta.len() };
+            let mod_secs = meta
+                .modified()
+                .ok()
+                .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+                .map(|d| d.as_secs())
+                .unwrap_or(0);
+            #[cfg(unix)]
+            let mode = {
+                use std::os::unix::fs::PermissionsExt;
+                format!("{:o}", meta.permissions().mode() & 0o777)
+            };
+            #[cfg(not(unix))]
+            let mode = String::from("644");
+
+            items.push(LocalFsItem {
+                name,
+                path: entry_path.to_string_lossy().to_string(),
+                size,
+                is_dir,
+                mod_time: mod_secs.to_string(),
+                mode,
+            });
+        }
+
+        items.sort_by(|a, b| {
+            b.is_dir
+                .cmp(&a.is_dir)
+                .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
         });
-    }
 
-    items.sort_by(|a, b| {
-        b.is_dir
-            .cmp(&a.is_dir)
-            .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
-    });
-
-    Ok(LocalFsListResult {
-        path: canonical.to_string_lossy().to_string(),
-        items,
+        Ok(LocalFsListResult {
+            path: canonical.to_string_lossy().to_string(),
+            items,
+        })
     })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
-fn local_fs_mkdir(path: String) -> Result<(), String> {
-    std::fs::create_dir_all(path).map_err(|e| e.to_string())
+async fn local_fs_mkdir(path: String) -> Result<(), String> {
+    tokio::task::spawn_blocking(move || std::fs::create_dir_all(path).map_err(|e| e.to_string()))
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
-fn local_fs_delete(path: String) -> Result<(), String> {
-    let p = PathBuf::from(&path);
-    if p.is_dir() {
-        std::fs::remove_dir_all(p).map_err(|e| e.to_string())
-    } else {
-        std::fs::remove_file(p).map_err(|e| e.to_string())
-    }
+async fn local_fs_delete(path: String) -> Result<(), String> {
+    tokio::task::spawn_blocking(move || {
+        let p = PathBuf::from(&path);
+        if p.is_dir() {
+            std::fs::remove_dir_all(p).map_err(|e| e.to_string())
+        } else {
+            std::fs::remove_file(p).map_err(|e| e.to_string())
+        }
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
-fn local_fs_read_bytes(path: String) -> Result<Vec<u8>, String> {
-    std::fs::read(path).map_err(|e| e.to_string())
+async fn local_fs_read_bytes(path: String) -> Result<Vec<u8>, String> {
+    tokio::task::spawn_blocking(move || {
+        let meta = std::fs::metadata(&path).map_err(|e| e.to_string())?;
+        if meta.len() > MAX_TRANSFER_BYTES {
+            return Err(format!(
+                "File '{}' exceeds 100 MB in-memory transfer limit",
+                path
+            ));
+        }
+        std::fs::read(path).map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
-fn local_fs_write_bytes(path: String, data: Vec<u8>) -> Result<(), String> {
-    std::fs::write(path, data).map_err(|e| e.to_string())
+async fn local_fs_write_bytes(path: String, data: Vec<u8>) -> Result<(), String> {
+    tokio::task::spawn_blocking(move || std::fs::write(path, data).map_err(|e| e.to_string()))
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
