@@ -209,7 +209,7 @@
   }
 
   async function handleDeleteTunnel(id: string) {
-    if (!confirm('Are you sure you want to delete this tunnel configuration?')) return;
+    if (!(await toast.confirm('Are you sure you want to delete this tunnel configuration?'))) return;
     let targetVaultId = activeVaultId;
     if (!targetVaultId) {
       const vaults = await api.getVaults();

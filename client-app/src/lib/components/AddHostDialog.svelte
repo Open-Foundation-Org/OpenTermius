@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { X, Server, ChevronDown, ChevronRight, Radio, Network } from '@lucide/svelte';
+  import { X, Server, ChevronDown, ChevronRight, Radio, Network, Eye, EyeOff } from '@lucide/svelte';
   import { api } from '../api/client';
   import { decryptVaultPayload } from '../crypto/vault';
 
@@ -22,6 +22,8 @@
   let password = $state('');
   let privateKey = $state('');
   let passphrase = $state('');
+  let showPassword = $state(false);
+  let showPassphrase = $state(false);
   let useMosh = $state(false);
   let group = $state('Default');
   let tags = $state('');
@@ -332,13 +334,28 @@
               {/each}
             </select>
           {:else if authType === 'password'}
-            <input
-              id="host-pass"
-              type="password"
-              bind:value={password}
-              placeholder="SSH password (optional)"
-              class="w-full rounded-xl border border-[#28283c] bg-[#0a0a10] px-3 py-2.5 text-sm sm:text-xs text-white placeholder-neutral-500 outline-none focus:border-emerald-500"
-            />
+            <div class="relative">
+              <input
+                id="host-pass"
+                type={showPassword ? 'text' : 'password'}
+                bind:value={password}
+                placeholder="SSH password (optional)"
+                class="w-full rounded-xl border border-[#28283c] bg-[#0a0a10] pl-3 pr-10 py-2.5 text-sm sm:text-xs text-white placeholder-neutral-500 outline-none focus:border-emerald-500"
+              />
+              <button
+                type="button"
+                onclick={() => (showPassword = !showPassword)}
+                class="absolute right-2.5 top-1/2 -translate-y-1/2 rounded-md p-1 text-neutral-400 hover:text-white transition cursor-pointer"
+                aria-label={showPassword ? 'Hide password' : 'Show password'}
+                title={showPassword ? 'Hide password' : 'Show password'}
+              >
+                {#if showPassword}
+                  <EyeOff class="h-4 w-4 sm:h-3.5 sm:w-3.5" />
+                {:else}
+                  <Eye class="h-4 w-4 sm:h-3.5 sm:w-3.5" />
+                {/if}
+              </button>
+            </div>
           {:else}
             <div class="space-y-2">
               <textarea
@@ -348,13 +365,28 @@
                 placeholder="-----BEGIN OPENSSH PRIVATE KEY-----"
                 class="w-full rounded-xl border border-[#28283c] bg-[#0a0a10] px-3 py-2 font-mono text-[11px] text-white placeholder-neutral-600 outline-none focus:border-emerald-500"
               ></textarea>
-              <input
-                id="host-passphrase"
-                type="password"
-                bind:value={passphrase}
-                placeholder="Passphrase (optional)"
-                class="w-full rounded-xl border border-[#28283c] bg-[#0a0a10] px-3 py-2 text-sm sm:text-xs text-white placeholder-neutral-500 outline-none focus:border-emerald-500"
-              />
+              <div class="relative">
+                <input
+                  id="host-passphrase"
+                  type={showPassphrase ? 'text' : 'password'}
+                  bind:value={passphrase}
+                  placeholder="Passphrase (optional)"
+                  class="w-full rounded-xl border border-[#28283c] bg-[#0a0a10] pl-3 pr-10 py-2 text-sm sm:text-xs text-white placeholder-neutral-500 outline-none focus:border-emerald-500"
+                />
+                <button
+                  type="button"
+                  onclick={() => (showPassphrase = !showPassphrase)}
+                  class="absolute right-2.5 top-1/2 -translate-y-1/2 rounded-md p-1 text-neutral-400 hover:text-white transition cursor-pointer"
+                  aria-label={showPassphrase ? 'Hide passphrase' : 'Show passphrase'}
+                  title={showPassphrase ? 'Hide passphrase' : 'Show passphrase'}
+                >
+                  {#if showPassphrase}
+                    <EyeOff class="h-4 w-4 sm:h-3.5 sm:w-3.5" />
+                  {:else}
+                    <Eye class="h-4 w-4 sm:h-3.5 sm:w-3.5" />
+                  {/if}
+                </button>
+              </div>
             </div>
           {/if}
         </div>

@@ -9,6 +9,9 @@
     RefreshCw,
     AlertCircle,
     Trash2,
+    Pencil,
+    Eye,
+    EyeOff,
     Lock,
     Key,
     Shield,
@@ -42,6 +45,8 @@
   let availableKeys = $state<Array<{ id: string; label: string; privateKey: string; passphrase?: string }>>([]);
 
   let isAddOpen = $state(false);
+  let editingId = $state<string | null>(null);
+  let showPassword = $state(false);
   let isSaving = $state(false);
   let formError = $state<string | null>(null);
 
@@ -123,11 +128,25 @@
   }
 
   function openAddModal() {
+    editingId = null;
     newLabel = '';
     newUsername = 'root';
     newAuthType = 'password';
     newPassword = '';
+    showPassword = false;
     selectedKeyId = availableKeys.length > 0 ? availableKeys[0].id : '';
+    formError = null;
+    isAddOpen = true;
+  }
+
+  function openEditModal(identity: IdentityItem) {
+    editingId = identity.id;
+    newLabel = identity.label;
+    newUsername = identity.username;
+    newAuthType = identity.authType;
+    newPassword = identity.password || '';
+    showPassword = false;
+    selectedKeyId = identity.keyId || (availableKeys.length > 0 ? availableKeys[0].id : '');
     formError = null;
     isAddOpen = true;
   }
@@ -168,29 +187,55 @@
 
       const { ciphertext, nonce } = await encryptVaultPayload(payload, api.getVaultSecret(vaultId));
 
-      const created = await api.createVaultItem(vaultId, {
-        kind: 'identity',
-        label: newLabel.trim(),
-        ciphertext,
-        nonce
-      });
+      if (editingId) {
+        await api.updateVaultItem(vaultId, editingId, {
+          label: newLabel.trim(),
+          ciphertext,
+          nonce
+        });
 
-      identities.unshift({
-        id: created.id,
-        label: newLabel.trim(),
-        username: newUsername.trim(),
-        authType: newAuthType,
-        password: newPassword,
-        keyId: selectedKeyId,
-        keyLabel: selectedKey?.label,
-        createdAt: created.created_at
-      });
+        identities = identities.map((item) =>
+          item.id === editingId
+            ? {
+                ...item,
+                label: newLabel.trim(),
+                username: newUsername.trim(),
+                authType: newAuthType,
+                password: newAuthType === 'password' ? newPassword : '',
+                keyId: newAuthType === 'key' ? selectedKeyId : '',
+                keyLabel: selectedKey?.label || ''
+              }
+            : item
+        );
+        toast.success('Identity updated.');
+      } else {
+        const created = await api.createVaultItem(vaultId, {
+          kind: 'identity',
+          label: newLabel.trim(),
+          ciphertext,
+          nonce
+        });
+
+        identities.unshift({
+          id: created.id,
+          label: newLabel.trim(),
+          username: newUsername.trim(),
+          authType: newAuthType,
+          password: newAuthType === 'password' ? newPassword : '',
+          keyId: newAuthType === 'key' ? selectedKeyId : '',
+          keyLabel: selectedKey?.label,
+          createdAt: created.created_at
+        });
+        toast.success('Identity saved.');
+      }
 
       state = 'success';
       isAddOpen = false;
+      editingId = null;
       newLabel = '';
       newUsername = 'root';
       newPassword = '';
+      showPassword = false;
       selectedKeyId = '';
     } catch (err: unknown) {
       formError = formatErrorMessage(err, 'Failed to save identity to vault');
@@ -202,12 +247,13 @@
   async function handleDeleteIdentity(id: string) {
     const vaultId = await getResolvedVaultId();
     if (!vaultId) return;
-    if (!confirm('Are you sure you want to delete this identity?')) return;
+    if (!(await toast.confirm('Are you sure you want to delete this identity?'))) return;
 
     try {
       await api.deleteVaultItem(vaultId, id);
       identities = identities.filter((i) => i.id !== id);
       if (identities.length === 0) state = 'empty';
+      toast.success('Identity deleted.');
     } catch (err: unknown) {
       toast.error(err, 'Failed to delete identity');
     }
@@ -315,14 +361,26 @@
                 </div>
               </div>
 
-              <button
-                type="button"
-                onclick={() => handleDeleteIdentity(identity.id)}
-                class="rounded-lg p-1.5 text-neutral-500 hover:text-rose-400 hover:bg-[#20202d] transition cursor-pointer"
-                title="Delete Identity"
-              >
-                <Trash2 class="h-3.5 w-3.5" />
-              </button>
+              <div class="flex items-center gap-1 shrink-0">
+                <button
+                  type="button"
+                  onclick={() => openEditModal(identity)}
+                  class="rounded-lg p-1.5 text-neutral-500 hover:text-emerald-400 hover:bg-[#20202d] transition cursor-pointer"
+                  title="Edit Identity"
+                  aria-label="Edit Identity"
+                >
+                  <Pencil class="h-3.5 w-3.5" />
+                </button>
+                <button
+                  type="button"
+                  onclick={() => handleDeleteIdentity(identity.id)}
+                  class="rounded-lg p-1.5 text-neutral-500 hover:text-rose-400 hover:bg-[#20202d] transition cursor-pointer"
+                  title="Delete Identity"
+                  aria-label="Delete Identity"
+                >
+                  <Trash2 class="h-3.5 w-3.5" />
+                </button>
+              </div>
             </div>
 
             <!-- Auth Details -->
@@ -362,8 +420,10 @@
             <UserCheck class="h-5 w-5" />
           </div>
           <div>
-            <h3 class="text-base font-bold text-white">Add Reusable Identity</h3>
-            <p class="text-xs text-neutral-400">Create an identity profile to auto-fill credentials on hosts.</p>
+            <h3 class="text-base font-bold text-white">{editingId ? 'Edit Identity' : 'Add Reusable Identity'}</h3>
+            <p class="text-xs text-neutral-400">
+              {editingId ? 'Update saved username or credentials for this identity.' : 'Create an identity profile to auto-fill credentials on hosts.'}
+            </p>
           </div>
         </div>
         <button type="button" onclick={() => (isAddOpen = false)} class="text-neutral-400 hover:text-white p-1 rounded-lg hover:bg-[#20202c] cursor-pointer">
@@ -427,13 +487,28 @@
           {#if newAuthType === 'password'}
             <div>
               <label for="identity-pass" class="block text-neutral-400 text-[11px] mb-1">Default Password</label>
-              <input
-                id="identity-pass"
-                type="password"
-                bind:value={newPassword}
-                placeholder="Password for this identity"
-                class="w-full rounded-lg border border-[#28283c] bg-[#090910] px-3 py-2 text-white placeholder-neutral-600 outline-none focus:border-indigo-500"
-              />
+              <div class="relative">
+                <input
+                  id="identity-pass"
+                  type={showPassword ? 'text' : 'password'}
+                  bind:value={newPassword}
+                  placeholder="Password for this identity"
+                  class="w-full rounded-lg border border-[#28283c] bg-[#090910] pl-3 pr-9 py-2 text-white placeholder-neutral-600 outline-none focus:border-indigo-500"
+                />
+                <button
+                  type="button"
+                  onclick={() => (showPassword = !showPassword)}
+                  class="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1 text-neutral-400 hover:text-white transition cursor-pointer"
+                  aria-label={showPassword ? 'Hide password' : 'Show password'}
+                  title={showPassword ? 'Hide password' : 'Show password'}
+                >
+                  {#if showPassword}
+                    <EyeOff class="h-3.5 w-3.5" />
+                  {:else}
+                    <Eye class="h-3.5 w-3.5" />
+                  {/if}
+                </button>
+              </div>
             </div>
           {:else}
             <div>
@@ -472,7 +547,7 @@
             disabled={isSaving}
             class="rounded-lg bg-indigo-600 px-5 py-2 font-semibold text-white shadow hover:bg-indigo-500 transition cursor-pointer active:scale-95 disabled:opacity-50"
           >
-            {isSaving ? 'Saving...' : 'Save Identity'}
+            {isSaving ? 'Saving...' : editingId ? 'Update Identity' : 'Save Identity'}
           </button>
         </div>
       </form>

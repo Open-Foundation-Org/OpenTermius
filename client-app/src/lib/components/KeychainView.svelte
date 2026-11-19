@@ -16,6 +16,8 @@
     Sparkles,
     FileKey,
     Download,
+    Eye,
+    EyeOff,
     X
   } from '@lucide/svelte';
 
@@ -26,6 +28,7 @@
   let { activeVaultId }: Props = $props();
 
   // 4 UI States
+  let showPassphrase = $state(false);
   let state = $state<'loading' | 'success' | 'empty' | 'error'>('loading');
   let errorMessage = $state<string | null>(null);
 
@@ -193,7 +196,7 @@
   async function handleDeleteKey(keyId: string) {
     const vaultId = await getResolvedVaultId();
     if (!vaultId) return;
-    if (!confirm('Are you sure you want to delete this SSH key from keychain?')) return;
+    if (!(await toast.confirm('Are you sure you want to delete this SSH key from keychain?'))) return;
 
     try {
       await api.deleteVaultItem(vaultId, keyId);
@@ -453,13 +456,28 @@
 
         <div>
           <label for="key-passphrase" class="block text-neutral-300 font-medium mb-1">Key Passphrase (Optional)</label>
-          <input
-            id="key-passphrase"
-            type="password"
-            bind:value={newPassphrase}
-            placeholder="Leave empty if key has no passphrase"
-            class="w-full rounded-lg border border-[#252535] bg-[#0c0c12] px-3 py-2 text-white placeholder-neutral-600 outline-none focus:border-emerald-500"
-          />
+          <div class="relative">
+            <input
+              id="key-passphrase"
+              type={showPassphrase ? 'text' : 'password'}
+              bind:value={newPassphrase}
+              placeholder="Leave empty if key has no passphrase"
+              class="w-full rounded-lg border border-[#252535] bg-[#0c0c12] pl-3 pr-9 py-2 text-white placeholder-neutral-600 outline-none focus:border-emerald-500"
+            />
+            <button
+              type="button"
+              onclick={() => (showPassphrase = !showPassphrase)}
+              class="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1 text-neutral-400 hover:text-white transition cursor-pointer"
+              aria-label={showPassphrase ? 'Hide passphrase' : 'Show passphrase'}
+              title={showPassphrase ? 'Hide passphrase' : 'Show passphrase'}
+            >
+              {#if showPassphrase}
+                <EyeOff class="h-3.5 w-3.5" />
+              {:else}
+                <Eye class="h-3.5 w-3.5" />
+              {/if}
+            </button>
+          </div>
         </div>
 
         <div class="flex justify-end gap-2 pt-3 border-t border-[#20202c]">

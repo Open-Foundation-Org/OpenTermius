@@ -57,10 +57,13 @@
     FileCode2,
     ScrollText,
     Settings,
-    LayoutGrid
+    LayoutGrid,
+    Eye,
+    EyeOff
   } from '@lucide/svelte';
 
   // Svelte 5 Runes State
+  let showAuthPassword = $state(false);
   let activeNav = $state('hosts');
   let searchQuery = $state('');
   let isAddHostOpen = $state(false);
@@ -350,7 +353,7 @@
 
   async function handleDeleteHost(host: any) {
     if (!activeVault) return;
-    if (!confirm(`Are you sure you want to remove host "${host.label}"?`)) return;
+    if (!(await toast.confirm(`Are you sure you want to remove host "${host.label}"?`))) return;
 
     try {
       await api.deleteVaultItem(activeVault.id, host.id);
@@ -1247,13 +1250,28 @@
                   </div>
                   <div>
                     <label for="auth-pw" class="block font-medium text-neutral-300 mb-1">Master Password</label>
-                    <input
-                      id="auth-pw"
-                      type="password"
-                      bind:value={authPassword}
-                      placeholder="••••••••••••"
-                      class="w-full rounded-lg border border-[#262635] bg-[#0c0c12] px-3 py-1.5 text-white outline-none focus:border-emerald-500"
-                    />
+                    <div class="relative">
+                      <input
+                        id="auth-pw"
+                        type={showAuthPassword ? 'text' : 'password'}
+                        bind:value={authPassword}
+                        placeholder="••••••••••••"
+                        class="w-full rounded-lg border border-[#262635] bg-[#0c0c12] pl-3 pr-9 py-1.5 text-white outline-none focus:border-emerald-500"
+                      />
+                      <button
+                        type="button"
+                        onclick={() => (showAuthPassword = !showAuthPassword)}
+                        class="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1 text-neutral-400 hover:text-white transition cursor-pointer"
+                        aria-label={showAuthPassword ? 'Hide password' : 'Show password'}
+                        title={showAuthPassword ? 'Hide password' : 'Show password'}
+                      >
+                        {#if showAuthPassword}
+                          <EyeOff class="h-3.5 w-3.5" />
+                        {:else}
+                          <Eye class="h-3.5 w-3.5" />
+                        {/if}
+                      </button>
+                    </div>
                   </div>
                 </div>
 

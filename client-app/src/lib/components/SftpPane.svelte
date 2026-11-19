@@ -181,7 +181,7 @@
   }
 
   async function handleDelete(item: ApiSftpFile) {
-    const confirmed = confirm(`Delete ${item.isDir ? 'folder' : 'file'} "${item.name}"?`);
+    const confirmed = await toast.confirm(`Delete ${item.isDir ? 'folder' : 'file'} "${item.name}"?`);
     if (!confirmed) return;
 
     try {

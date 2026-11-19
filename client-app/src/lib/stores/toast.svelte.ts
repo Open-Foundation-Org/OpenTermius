@@ -53,7 +53,27 @@ export function formatErrorMessage(err: unknown, fallback = 'Something went wron
 
 class ToastStore {
   items = $state<ToastItem[]>([]);
+  confirmRequest = $state<{
+    message: string;
+    confirmLabel: string;
+    resolve: (value: boolean) => void;
+  } | null>(null);
   private nextId = 1;
+
+  confirm(message: string, confirmLabel = 'Delete'): Promise<boolean> {
+    if (this.confirmRequest) {
+      this.confirmRequest.resolve(false);
+    }
+    return new Promise((resolve) => {
+      this.confirmRequest = { message, confirmLabel, resolve };
+    });
+  }
+
+  resolveConfirm(value: boolean) {
+    const req = this.confirmRequest;
+    this.confirmRequest = null;
+    req?.resolve(value);
+  }
 
   show(kind: ToastKind, message: string, durationMs?: number) {
     const id = this.nextId++;
