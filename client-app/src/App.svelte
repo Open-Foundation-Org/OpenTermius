@@ -213,9 +213,10 @@
       currentUserId = me.id;
       isAuthenticated = true;
 
-      // 2. Load Vaults from Backend (ensure user always has a Personal Vault even if invited to a Team Vault first)
+      // 2. Load Vaults from Backend (or local cache if Gateway is temporarily unreachable)
       vaults = await api.getVaults();
-      if (!vaults.some((v) => v.type === 'personal')) {
+      gatewayOnline = api.isGatewayOnline();
+      if (gatewayOnline && !vaults.some((v) => v.type === 'personal')) {
         const initialVault = await api.createVault(
           'Personal Cloud Vault',
           'personal',
@@ -227,13 +228,18 @@
         activeVault = vaults[0];
       }
 
-      // 3. Load Hosts from Backend Database
+      // 3. Load Hosts from Backend Database (or local cache when offline)
       await loadHosts();
+      gatewayOnline = api.isGatewayOnline();
     } catch (err: unknown) {
-      if (err instanceof Error && err.message.includes('401')) {
+      const status = (err as { status?: number } | null)?.status;
+      const isUnauthorized =
+        status === 401 ||
+        (err instanceof Error && /401|unauthorized|invalid.*token|expired/i.test(err.message));
+      if (isUnauthorized) {
         api.clearToken();
         isAuthenticated = false;
-        connectionChoice = 'select';
+        connectionChoice = 'gateway';
         loadState = 'success';
       } else {
         loadState = 'error';
@@ -714,7 +720,7 @@
     (window as any).AndroidClipboard?.setKeepAliveSessions?.(count);
   });
 
-  const APP_VERSION = '0.5.0';
+  const APP_VERSION = '0.5.1';
   type DesktopUpdate = Awaited<ReturnType<typeof import('@tauri-apps/plugin-updater').check>>;
   let availableUpdate = $state<DesktopUpdate | null>(null);
   let releaseFallback = $state<{ version: string; url: string } | null>(null);

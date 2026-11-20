@@ -8,8 +8,9 @@ import (
 )
 
 type AuthService interface {
-	Register(ctx context.Context, email, password, name string) (*domain.User, string, error)
-	Login(ctx context.Context, email, password string) (*domain.User, string, error)
+	Register(ctx context.Context, email, password, name string) (*domain.User, string, string, error)
+	Login(ctx context.Context, email, password string) (*domain.User, string, string, error)
+	Refresh(ctx context.Context, refreshToken string) (*domain.User, string, string, error)
 	ValidateToken(ctx context.Context, tokenString string) (uuid.UUID, error)
 	GetProfile(ctx context.Context, userID uuid.UUID) (*domain.User, error)
 	ListUsers(ctx context.Context) ([]domain.User, error)

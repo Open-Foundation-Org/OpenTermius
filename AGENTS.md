@@ -57,7 +57,12 @@ When releasing new client-app changes, ALWAYS bump the version and publish a new
      `export PATH="/opt/homebrew/opt/lld/bin:/opt/homebrew/opt/llvm/bin:$PATH" && cd client-app && npx tauri build --runner cargo-xwin --target x86_64-pc-windows-msvc --bundles nsis`
 3. **Tag & Publish Release:**
    - Commit & push to `main`: `git commit -m "chore(release): bump version to X.Y.Z" && git tag vX.Y.Z && git push origin main vX.Y.Z`
-   - Generate `latest.json` (with `darwin-aarch64` and `windows-x86_64` URLs + `.sig` signatures) and create GitHub Release with APK, DMG, EXE, updater bundles/sigs, and `latest.json`. ALWAYS include the macOS Gatekeeper Note (`xattr -cr /Applications/OpenTermius.app`) in `--notes`:
+   - Generate `latest.json` (with `darwin-aarch64` and `windows-x86_64` URLs + `.sig` signatures) and create GitHub Release with APK, DMG, EXE, updater bundles/sigs, and `latest.json`.
+     - **CRITICAL (`latest.json` URLs):** `gh release create` keeps the **original file basename** in download URLs (NOT the `#label`). Always use exact basenames in `latest.json`:
+       - `darwin-aarch64`: `.../releases/download/vX.Y.Z/opentermius.app.tar.gz`
+       - `windows-x86_64`: `.../releases/download/vX.Y.Z/opentermius_X.Y.Z_x64-setup.exe`
+     - **Mandatory post-release verification:** After `gh release create`, run `curl -fsIL` on `latest.json` and BOTH platform URLs inside `latest.json` to confirm `HTTP 200` before reporting release complete.
+     - ALWAYS include the macOS Gatekeeper Note (`xattr -cr /Applications/OpenTermius.app`) in `--notes`:
      ```bash
      gh release create vX.Y.Z \
        "client-app/src-tauri/gen/android/app/build/outputs/apk/universal/release/app-universal-release.apk#OpenTermius_X.Y.Z_android_universal.apk" \

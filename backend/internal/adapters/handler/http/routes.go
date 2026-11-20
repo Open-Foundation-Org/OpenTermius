@@ -43,6 +43,7 @@ func (r *Router) registerRoutes() {
 	// Public Auth Endpoints
 	r.mux.HandleFunc("POST /api/v1/auth/register", r.authHandler.Register)
 	r.mux.HandleFunc("POST /api/v1/auth/login", r.authHandler.Login)
+	r.mux.HandleFunc("POST /api/v1/auth/refresh", r.authHandler.Refresh)
 
 	// Protected Profile & User Management (Gateway Admin Console)
 	r.mux.Handle("GET /api/v1/auth/me", r.authMiddleware(http.HandlerFunc(r.authHandler.Me)))

@@ -8,6 +8,7 @@ export interface AuthResponse {
     created_at: string;
   };
   token: string;
+  refresh_token?: string;
 }
 
 export interface ApiVault {
@@ -143,6 +144,8 @@ const GW_SYNC_QUEUE_KEY = 'opentermius_gw_sync_queue';
 
 class ApiClient {
   private token: string | null = null;
+  private refreshToken: string | null = null;
+  private refreshPromise: Promise<boolean> | null = null;
   private apiBase: string = 'http://localhost:8080/api/v1';
   private standalone: boolean = false;
   private gatewayOnline: boolean = true;
@@ -152,6 +155,7 @@ class ApiClient {
   constructor() {
     if (typeof window !== 'undefined') {
       this.token = localStorage.getItem('opentermius_jwt_token');
+      this.refreshToken = localStorage.getItem('opentermius_refresh_token');
       this.apiBase = localStorage.getItem('opentermius_api_base') || 'http://localhost:8080/api/v1';
       this.standalone = localStorage.getItem('opentermius_mode') === 'standalone';
       window.addEventListener('online', () => {
@@ -174,8 +178,11 @@ class ApiClient {
   private isNetworkError(err: unknown): boolean {
     if (typeof navigator !== 'undefined' && !navigator.onLine) return true;
     if (err instanceof TypeError) return true;
+    if (err instanceof DOMException && (err.name === 'AbortError' || err.name === 'TimeoutError')) return true;
+    const status = (err as { status?: number } | null)?.status;
+    if (typeof status === 'number' && status >= 500) return true;
     const msg = err instanceof Error ? err.message : String(err);
-    return /failed to fetch|networkerror|load failed|network request failed|econnrefused|timed out|timeout/i.test(msg);
+    return /failed to fetch|networkerror|load failed|network request failed|econnrefused|timed out|timeout|aborted|bad gateway|service unavailable|gateway timeout|unexpected token/i.test(msg);
   }
 
   private readJson<T>(key: string, fallback: T): T {
@@ -402,10 +409,20 @@ class ApiClient {
     }
   }
 
-  setToken(token: string) {
+  setToken(token: string, refreshToken?: string) {
     this.token = token;
     if (typeof window !== 'undefined') {
       localStorage.setItem('opentermius_jwt_token', token);
+    }
+    if (refreshToken !== undefined) {
+      this.refreshToken = refreshToken || null;
+      if (typeof window !== 'undefined') {
+        if (refreshToken) {
+          localStorage.setItem('opentermius_refresh_token', refreshToken);
+        } else {
+          localStorage.removeItem('opentermius_refresh_token');
+        }
+      }
     }
   }
 
@@ -415,25 +432,77 @@ class ApiClient {
 
   clearToken() {
     this.token = null;
+    this.refreshToken = null;
     this.standalone = false;
     if (typeof window !== 'undefined') {
       localStorage.removeItem('opentermius_jwt_token');
+      localStorage.removeItem('opentermius_refresh_token');
       localStorage.removeItem('opentermius_mode');
     }
   }
 
-  private async request<T>(path: string, options: RequestInit = {}): Promise<T> {
+  private async tryRefreshAccessToken(): Promise<boolean> {
+    if (!this.refreshToken) return false;
+    if (this.refreshPromise) return this.refreshPromise;
+
+    this.refreshPromise = (async () => {
+      try {
+        const res = await this.request<AuthResponse>(
+          '/auth/refresh',
+          {
+            method: 'POST',
+            body: JSON.stringify({ refresh_token: this.refreshToken })
+          },
+          true
+        );
+        if (!res.token) return false;
+        this.setToken(res.token, res.refresh_token ?? this.refreshToken ?? undefined);
+        if (res.user) this.writeJson(GW_USER_CACHE_KEY, res.user);
+        return true;
+      } catch {
+        return false;
+      } finally {
+        this.refreshPromise = null;
+      }
+    })();
+
+    return this.refreshPromise;
+  }
+
+  private async request<T>(path: string, options: RequestInit = {}, skipAuthRefresh = false): Promise<T> {
     const headers = new Headers(options.headers || {});
     headers.set('Content-Type', 'application/json');
 
-    if (this.token) {
+    if (this.token && path !== '/auth/login' && path !== '/auth/refresh') {
       headers.set('Authorization', `Bearer ${this.token}`);
     }
 
-    const response = await fetch(`${this.apiBase}${path}`, {
-      ...options,
-      headers
-    });
+    const controller = !options.signal ? new AbortController() : null;
+    const timeoutId = controller ? setTimeout(() => controller.abort(), 8000) : null;
+
+    let response: Response;
+    try {
+      response = await fetch(`${this.apiBase}${path}`, {
+        ...options,
+        headers,
+        signal: options.signal ?? controller?.signal
+      });
+    } finally {
+      if (timeoutId) clearTimeout(timeoutId);
+    }
+
+    if (
+      response.status === 401 &&
+      !skipAuthRefresh &&
+      path !== '/auth/login' &&
+      path !== '/auth/refresh' &&
+      this.refreshToken
+    ) {
+      const refreshed = await this.tryRefreshAccessToken();
+      if (refreshed) {
+        return this.request<T>(path, options, true);
+      }
+    }
 
     if (!response.ok) {
       let errorMsg = `API Error: ${response.status} ${response.statusText}`;
@@ -443,9 +512,12 @@ class ApiClient {
       } catch {
         // ignore
       }
-      throw new Error(errorMsg);
+      const apiErr = new Error(errorMsg) as Error & { status?: number };
+      apiErr.status = response.status;
+      throw apiErr;
     }
 
+    this.gatewayOnline = true;
     return response.json() as Promise<T>;
   }
 
@@ -455,8 +527,9 @@ class ApiClient {
       method: 'POST',
       body: JSON.stringify({ email, password })
     });
-    this.setToken(res.token);
+    this.setToken(res.token, res.refresh_token);
     this.setStandalone(false);
+    this.writeJson(GW_USER_CACHE_KEY, res.user);
     return res;
   }
 
@@ -470,8 +543,13 @@ class ApiClient {
       return me;
     } catch (err) {
       if (this.isNetworkError(err)) {
+        this.gatewayOnline = false;
         const cached = this.readJson<{ id: string; email: string; name: string } | null>(GW_USER_CACHE_KEY, null);
         if (cached && this.token) return cached;
+        const cachedVaults = this.readJson<ApiVault[]>(GW_VAULTS_CACHE_KEY, []);
+        if (this.token && cachedVaults.length > 0) {
+          return { id: 'cached-offline-user', email: '', name: 'Offline Operator' };
+        }
       }
       throw err;
     }
@@ -505,6 +583,7 @@ class ApiClient {
       return vaults;
     } catch (err) {
       if (this.isNetworkError(err)) {
+        this.gatewayOnline = false;
         const cached = this.readJson<ApiVault[]>(GW_VAULTS_CACHE_KEY, []);
         if (cached.length > 0) return cached;
       }
@@ -555,6 +634,7 @@ class ApiClient {
       return kind ? allItems.filter((i) => i.kind === kind) : allItems;
     } catch (err) {
       if (this.isNetworkError(err)) {
+        this.gatewayOnline = false;
         const cached = this.readGatewayItemsCache(vaultId);
         return kind ? cached.filter((i) => i.kind === kind) : cached;
       }

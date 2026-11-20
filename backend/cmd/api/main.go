@@ -54,7 +54,7 @@ func main() {
 	vaultRepo := postgres.NewVaultRepository(pool)
 
 	// 3. Initialize UseCases (Application Business Rules)
-	authUC := usecase.NewAuthUseCase(userRepo, jwtSecret, 72*time.Hour)
+	authUC := usecase.NewAuthUseCase(userRepo, jwtSecret, 24*time.Hour, 90*24*time.Hour)
 	vaultUC := usecase.NewVaultUseCase(vaultRepo, userRepo)
 	presenceUC := usecase.NewPresenceUseCase(vaultRepo, userRepo)
 
@@ -63,7 +63,7 @@ func main() {
 		adminEmail := getEnv("DEFAULT_ADMIN_EMAIL", "admin@opentermius.local")
 		adminPass := getEnv("DEFAULT_ADMIN_PASSWORD", "OpenTermius2026!")
 		adminName := getEnv("DEFAULT_ADMIN_NAME", "Gateway Admin")
-		if _, _, err := authUC.Register(ctx, adminEmail, adminPass, adminName); err == nil {
+		if _, _, _, err := authUC.Register(ctx, adminEmail, adminPass, adminName); err == nil {
 			log.Printf("Seeded default Gateway Admin user: %s", adminEmail)
 		}
 	}

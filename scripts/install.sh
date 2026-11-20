@@ -144,6 +144,73 @@ postgres_already_running() {
   return 1
 }
 
+PG_MODE="${OPENTERMIUS_PG_MODE:-}"
+
+prompt_input() {
+  local __var="$1" __label="$2" __default="$3" __val=""
+  if [ -r /dev/tty ]; then
+    printf "%s [%s]: " "$__label" "$__default" >/dev/tty
+    IFS= read -r __val </dev/tty || true
+  fi
+  [ -z "$__val" ] && __val="$__default"
+  printf -v "$__var" '%s' "$__val"
+}
+
+prompt_secret() {
+  local __var="$1" __label="$2" __default="$3" __val=""
+  if [ -r /dev/tty ]; then
+    printf "%s: " "$__label" >/dev/tty
+    IFS= read -rs __val </dev/tty || true
+    printf "\n" >/dev/tty
+  fi
+  [ -z "$__val" ] && __val="$__default"
+  printf -v "$__var" '%s' "$__val"
+}
+
+ask_postgres_mode() {
+  if [ -n "$PG_MODE" ]; then
+    ok "PostgreSQL mode (from env): $PG_MODE"
+    return
+  fi
+  if [ -n "${DATABASE_URL:-}" ]; then
+    PG_MODE="existing"
+    ok "DATABASE_URL provided — using existing PostgreSQL (skipping server install)"
+    return
+  fi
+
+  local default_choice="2"
+  if postgres_already_running || command -v psql >/dev/null 2>&1; then
+    default_choice="1"
+  fi
+
+  if [ -r /dev/tty ]; then
+    printf "\nPostgreSQL Setup:\n" >/dev/tty
+    printf "  1) Use existing PostgreSQL (local / remote / Docker — skip server install)\n" >/dev/tty
+    printf "  2) Install new local PostgreSQL server\n" >/dev/tty
+  fi
+
+  local choice=""
+  prompt_input choice "Select PostgreSQL option (1/2)" "$default_choice"
+  case "$choice" in
+    1|existing|Existing|EXISTING)
+      PG_MODE="existing"
+      ok "Using existing PostgreSQL (server install/upgrade skipped)"
+      ;;
+    2|install|Install|INSTALL)
+      PG_MODE="install"
+      ok "Will install local PostgreSQL server"
+      ;;
+    *)
+      if [ "$default_choice" = "1" ]; then
+        PG_MODE="existing"
+      else
+        PG_MODE="install"
+      fi
+      warn "Invalid choice '$choice', defaulting to: $PG_MODE"
+      ;;
+  esac
+}
+
 install_deps_macos() {
   if ! command -v brew >/dev/null 2>&1; then
     log "Installing Homebrew..."
@@ -151,26 +218,36 @@ install_deps_macos() {
     eval "$(/opt/homebrew/bin/brew shellenv 2>/dev/null || /usr/local/bin/brew shellenv 2>/dev/null || true)"
   fi
 
-  log "Installing Go, Node.js, git, openssl via Homebrew..."
-  brew install go node git openssl@3
+  log "Checking Go, Node.js, git, openssl..."
+  local brew_pkgs=()
+  command -v go >/dev/null 2>&1 || brew_pkgs+=(go)
+  command -v node >/dev/null 2>&1 || brew_pkgs+=(node)
+  command -v git >/dev/null 2>&1 || brew_pkgs+=(git)
+  command -v openssl >/dev/null 2>&1 || brew_pkgs+=(openssl@3)
+  if [ "${#brew_pkgs[@]}" -gt 0 ]; then
+    brew install "${brew_pkgs[@]}"
+  fi
 
-  if postgres_already_running; then
-    ok "Existing PostgreSQL detected on port ${PGPORT:-5432} (skipping PostgreSQL install/start)"
+  if [ "$PG_MODE" = "existing" ]; then
+    ok "Skipping PostgreSQL server install (using existing PostgreSQL)"
     if ! command -v psql >/dev/null 2>&1; then
+      log "Installing psql client (libpq)..."
       brew install libpq
       export PATH="$(brew --prefix libpq)/bin:$PATH"
     fi
-  elif command -v psql >/dev/null 2>&1; then
-    ok "PostgreSQL client already installed: $(psql --version)"
   else
-    log "Installing latest PostgreSQL via Homebrew..."
-    brew install postgresql
-    brew services start postgresql || true
-    local pg_bin
-    pg_bin="$(brew --prefix postgresql)/bin"
-    export PATH="$pg_bin:$PATH"
-    if ! grep -q "$pg_bin" "$HOME/.zshrc" 2>/dev/null; then
-      echo "export PATH=\"$pg_bin:\$PATH\"" >> "$HOME/.zshrc"
+    if postgres_already_running; then
+      ok "PostgreSQL already running on port ${PGPORT:-5432}"
+    else
+      log "Installing PostgreSQL via Homebrew..."
+      brew install postgresql
+      brew services start postgresql || true
+      local pg_bin
+      pg_bin="$(brew --prefix postgresql)/bin"
+      export PATH="$pg_bin:$PATH"
+      if ! grep -q "$pg_bin" "$HOME/.zshrc" 2>/dev/null; then
+        echo "export PATH=\"$pg_bin:\$PATH\"" >> "$HOME/.zshrc"
+      fi
     fi
   fi
   ok "macOS dependencies ready"
@@ -178,9 +255,12 @@ install_deps_macos() {
 
 install_deps_linux() {
   local has_pg=0
-  if postgres_already_running; then
+  if [ "$PG_MODE" = "existing" ]; then
     has_pg=1
-    ok "Existing PostgreSQL detected (skipping server install/initdb)"
+    ok "Skipping PostgreSQL server install/upgrade (using existing PostgreSQL)"
+  elif postgres_already_running; then
+    has_pg=1
+    ok "Existing PostgreSQL already running (skipping server install/initdb)"
   fi
 
   case "$PLATFORM" in
@@ -279,27 +359,6 @@ clone_or_update_repo() {
   fi
 }
 
-prompt_input() {
-  local __var="$1" __label="$2" __default="$3" __val=""
-  if [ -r /dev/tty ]; then
-    printf "%s [%s]: " "$__label" "$__default" >/dev/tty
-    IFS= read -r __val </dev/tty || true
-  fi
-  [ -z "$__val" ] && __val="$__default"
-  printf -v "$__var" '%s' "$__val"
-}
-
-prompt_secret() {
-  local __var="$1" __label="$2" __default="$3" __val=""
-  if [ -r /dev/tty ]; then
-    printf "%s: " "$__label" >/dev/tty
-    IFS= read -rs __val </dev/tty || true
-    printf "\n" >/dev/tty
-  fi
-  [ -z "$__val" ] && __val="$__default"
-  printf -v "$__var" '%s' "$__val"
-}
-
 urlencode() {
   local s="$1" out="" i c hex
   for ((i = 0; i < ${#s}; i++)); do
@@ -394,7 +453,11 @@ setup_database_and_env() {
     if [ -n "${DATABASE_URL:-}" ]; then
       ok "Using user-provided DATABASE_URL"
     else
-      if postgres_already_running; then
+      if [ "$PG_MODE" = "existing" ]; then
+        use_existing="Y"
+      elif [ "$PG_MODE" = "install" ]; then
+        use_existing="N"
+      elif postgres_already_running; then
         prompt_input use_existing "PostgreSQL detected. Connect to an existing database? (Y/n)" "Y"
       else
         prompt_input use_existing "Connect to an existing external/local PostgreSQL database? (y/N)" "N"
@@ -637,6 +700,7 @@ EOF
 
 main() {
   detect_platform
+  ask_postgres_mode
   if [ "$PLATFORM" = "macos" ]; then
     install_deps_macos
   else

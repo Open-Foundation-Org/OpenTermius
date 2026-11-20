@@ -28,9 +28,14 @@ type loginRequest struct {
 	Password string `json:"password"`
 }
 
+type refreshRequest struct {
+	RefreshToken string `json:"refresh_token"`
+}
+
 type authResponse struct {
-	User  *domain.User `json:"user"`
-	Token string       `json:"token"`
+	User         *domain.User `json:"user"`
+	Token        string       `json:"token"`
+	RefreshToken string       `json:"refresh_token"`
 }
 
 func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
@@ -40,7 +45,7 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	user, token, err := h.authService.Register(r.Context(), req.Email, req.Password, req.Name)
+	user, token, refreshToken, err := h.authService.Register(r.Context(), req.Email, req.Password, req.Name)
 	if err != nil {
 		if errors.Is(err, domain.ErrConflict) {
 			writeJSONError(w, http.StatusConflict, "email already registered")
@@ -54,7 +59,7 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusCreated, authResponse{User: user, Token: token})
+	writeJSON(w, http.StatusCreated, authResponse{User: user, Token: token, RefreshToken: refreshToken})
 }
 
 func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
@@ -64,13 +69,29 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	user, token, err := h.authService.Login(r.Context(), req.Email, req.Password)
+	user, token, refreshToken, err := h.authService.Login(r.Context(), req.Email, req.Password)
 	if err != nil {
 		writeJSONError(w, http.StatusUnauthorized, "invalid email or password")
 		return
 	}
 
-	writeJSON(w, http.StatusOK, authResponse{User: user, Token: token})
+	writeJSON(w, http.StatusOK, authResponse{User: user, Token: token, RefreshToken: refreshToken})
+}
+
+func (h *AuthHandler) Refresh(w http.ResponseWriter, r *http.Request) {
+	var req refreshRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.RefreshToken == "" {
+		writeJSONError(w, http.StatusBadRequest, "refresh_token is required")
+		return
+	}
+
+	user, token, refreshToken, err := h.authService.Refresh(r.Context(), req.RefreshToken)
+	if err != nil {
+		writeJSONError(w, http.StatusUnauthorized, "invalid or expired refresh token")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, authResponse{User: user, Token: token, RefreshToken: refreshToken})
 }
 
 func (h *AuthHandler) Me(w http.ResponseWriter, r *http.Request) {
@@ -114,7 +135,7 @@ func (h *AuthHandler) CreateUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	user, _, err := h.authService.Register(r.Context(), req.Email, req.Password, req.Name)
+	user, _, _, err := h.authService.Register(r.Context(), req.Email, req.Password, req.Name)
 	if err != nil {
 		if errors.Is(err, domain.ErrConflict) {
 			writeJSONError(w, http.StatusConflict, "email already registered")

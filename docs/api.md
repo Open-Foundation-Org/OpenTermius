@@ -14,7 +14,8 @@ This document serves as the single source of truth for all OpenTermius Gateway R
 | Method | Path | Summary | Auth Required |
 |---|---|---|---|
 | `POST` | `/api/v1/auth/register` | Register new user account (Gateway Web Console) | No |
-| `POST` | `/api/v1/auth/login` | Login and receive JWT access token | No |
+| `POST` | `/api/v1/auth/login` | Login and receive JWT access + refresh token | No |
+| `POST` | `/api/v1/auth/refresh` | Exchange valid refresh token for a fresh access + refresh token pair | No |
 | `GET` | `/api/v1/auth/me` | Fetch authenticated user profile | Yes |
 | `GET` | `/api/v1/users` | List all registered users (Gateway Admin Console) | Yes |
 | `POST` | `/api/v1/users` | Create/register a new user account (Gateway Admin Console) | Yes |
