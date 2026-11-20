@@ -34,6 +34,7 @@
   }
 
   interface Props {
+    paneId: 'left' | 'right';
     paneTitle: string;
     hosts: SftpHostItem[];
     targetId: string;
@@ -43,10 +44,16 @@
     currentPath: string;
     onPathChange: (path: string) => void;
     onItemsLoaded?: (items: ApiSftpFile[]) => void;
+    onStartDrag?: (e: PointerEvent, item: ApiSftpFile) => void;
+    dragHoverPane?: 'left' | 'right' | null;
+    dragHoverFolderPath?: string | null;
+    dragSourcePane?: 'left' | 'right' | null;
+    suppressNextClick?: () => boolean;
     refreshSignal?: number;
   }
 
   let {
+    paneId,
     paneTitle,
     hosts = [],
     targetId,
@@ -56,8 +63,32 @@
     currentPath = '',
     onPathChange,
     onItemsLoaded,
+    onStartDrag,
+    dragHoverPane = null,
+    dragHoverFolderPath = null,
+    dragSourcePane = null,
+    suppressNextClick,
     refreshSignal = 0
   }: Props = $props();
+
+  let isPaneDragOver = $derived(
+    dragHoverPane === paneId && !dragHoverFolderPath && dragSourcePane !== paneId
+  );
+
+  function handleRowPointerDown(e: PointerEvent, item: ApiSftpFile) {
+    if (e.button !== 0) return;
+    if ((e.target as HTMLElement | null)?.closest('[data-no-drag]')) return;
+    onStartDrag?.(e, item);
+  }
+
+  function handleRowActionClick(item: ApiSftpFile) {
+    if (suppressNextClick?.()) return;
+    if (item.isDir) {
+      loadDirectory(item.path);
+    } else {
+      toggleSelect(item);
+    }
+  }
 
   let pathInputValue = $state('');
   let items = $state<ApiSftpFile[]>([]);
@@ -377,7 +408,12 @@
   </div>
 
   <!-- File List -->
-  <div class="flex-1 overflow-y-auto">
+  <div
+    data-sftp-pane={paneId}
+    class="flex-1 overflow-y-auto transition select-none {isPaneDragOver ? 'ring-2 ring-inset ring-emerald-500/70 bg-emerald-500/5' : ''}"
+    role="region"
+    aria-label="{paneTitle} file list dropzone"
+  >
     {#if loadState === 'loading'}
       <div class="flex h-full items-center justify-center text-xs text-neutral-400">
         Loading...
@@ -396,7 +432,7 @@
       </div>
     {:else if loadState === 'empty' || filteredItems.length === 0}
       <div class="flex h-full flex-col items-center justify-center p-6 text-center text-xs text-neutral-500">
-        Empty directory
+        {isPaneDragOver ? 'Drop here to transfer' : 'Empty directory'}
       </div>
     {:else}
       <!-- Mobile Touch File List -->
@@ -404,23 +440,27 @@
         {#each filteredItems as item (item.path)}
           {@const Icon = getFileIcon(item)}
           {@const isSelected = selectedPaths.includes(item.path)}
-          <div class="flex items-center gap-2.5 px-3 py-2.5 transition {isSelected ? 'bg-emerald-500/10' : 'active:bg-[#15151e]'}">
-            {#if !item.isDir}
-              <button
-                type="button"
-                onclick={() => toggleSelect(item)}
-                class="flex h-6 w-6 shrink-0 items-center justify-center rounded border transition {isSelected ? 'border-emerald-500 bg-emerald-500 text-black' : 'border-[#323244] bg-[#0c0c11] text-transparent'}"
-                aria-label="Select file"
-              >
-                <Check class="h-3.5 w-3.5" />
-              </button>
-            {:else}
-              <div class="w-6 shrink-0"></div>
-            {/if}
+          {@const isFolderDropTarget = item.isDir && dragHoverPane === paneId && dragHoverFolderPath === item.path}
+          <div
+            data-sftp-folder={item.isDir ? item.path : undefined}
+            data-sftp-folder-pane={item.isDir ? paneId : undefined}
+            onpointerdown={(e) => handleRowPointerDown(e, item)}
+            role="listitem"
+            class="flex items-center gap-2.5 px-3 py-2.5 transition {isFolderDropTarget ? 'bg-emerald-500/20 ring-1 ring-inset ring-emerald-500/70' : isSelected ? 'bg-emerald-500/10' : 'active:bg-[#15151e]'}"
+          >
+            <button
+              type="button"
+              data-no-drag
+              onclick={() => toggleSelect(item)}
+              class="flex h-6 w-6 shrink-0 items-center justify-center rounded border transition {isSelected ? 'border-emerald-500 bg-emerald-500 text-black' : 'border-[#323244] bg-[#0c0c11] text-transparent'}"
+              aria-label="Select item"
+            >
+              <Check class="h-3.5 w-3.5" />
+            </button>
 
             <button
               type="button"
-              onclick={() => (item.isDir ? loadDirectory(item.path) : toggleSelect(item))}
+              onclick={() => handleRowActionClick(item)}
               class="flex flex-1 items-center gap-2.5 min-w-0 text-left py-0.5"
             >
               <Icon class="h-4.5 w-4.5 shrink-0 {item.isDir ? 'text-amber-400' : 'text-neutral-400'}" />
@@ -432,7 +472,7 @@
               </div>
             </button>
 
-            <div class="flex items-center gap-1 shrink-0">
+            <div class="flex items-center gap-1 shrink-0" data-no-drag>
               {#if !item.isDir && !isLocal}
                 <button
                   type="button"
@@ -470,31 +510,27 @@
           {#each filteredItems as item (item.path)}
             {@const Icon = getFileIcon(item)}
             {@const isSelected = selectedPaths.includes(item.path)}
+            {@const isFolderDropTarget = item.isDir && dragHoverPane === paneId && dragHoverFolderPath === item.path}
             <tr
-              class="group transition {isSelected ? 'bg-emerald-500/10' : 'hover:bg-[#15151e]'}"
+              data-sftp-folder={item.isDir ? item.path : undefined}
+              data-sftp-folder-pane={item.isDir ? paneId : undefined}
+              onpointerdown={(e) => handleRowPointerDown(e, item)}
+              class="group transition cursor-grab active:cursor-grabbing {isFolderDropTarget ? 'bg-emerald-500/20 ring-1 ring-inset ring-emerald-500/70' : isSelected ? 'bg-emerald-500/10' : 'hover:bg-[#15151e]'}"
             >
-              <td class="px-2.5 py-1.5">
-                {#if !item.isDir}
-                  <button
-                    type="button"
-                    onclick={() => toggleSelect(item)}
-                    class="flex h-4 w-4 items-center justify-center rounded border transition {isSelected ? 'border-emerald-500 bg-emerald-500 text-black' : 'border-[#323244] bg-[#0c0c11] text-transparent hover:border-neutral-400'}"
-                    aria-label="Select file"
-                  >
-                    <Check class="h-3 w-3" />
-                  </button>
-                {/if}
+              <td class="px-2.5 py-1.5" data-no-drag>
+                <button
+                  type="button"
+                  onclick={() => toggleSelect(item)}
+                  class="flex h-4 w-4 items-center justify-center rounded border transition {isSelected ? 'border-emerald-500 bg-emerald-500 text-black' : 'border-[#323244] bg-[#0c0c11] text-transparent hover:border-neutral-400'}"
+                  aria-label="Select item"
+                >
+                  <Check class="h-3 w-3" />
+                </button>
               </td>
               <td class="py-1.5 px-2 min-w-0">
                 <button
                   type="button"
-                  onclick={() => {
-                    if (item.isDir) {
-                      loadDirectory(item.path);
-                    } else {
-                      toggleSelect(item);
-                    }
-                  }}
+                  onclick={() => handleRowActionClick(item)}
                   class="flex items-center gap-2 w-full text-left min-w-0"
                 >
                   <Icon class="h-3.5 w-3.5 shrink-0 {item.isDir ? 'text-amber-400' : 'text-neutral-400'}" />
@@ -506,7 +542,7 @@
               <td class="py-1.5 px-2 text-right font-mono text-[11px] text-neutral-400 whitespace-nowrap">
                 {formatSize(item.size, item.isDir)}
               </td>
-              <td class="py-1.5 px-2 text-right whitespace-nowrap">
+              <td class="py-1.5 px-2 text-right whitespace-nowrap" data-no-drag>
                 <div class="inline-flex items-center gap-1 opacity-80 group-hover:opacity-100">
                   {#if !item.isDir && !isLocal}
                     <button

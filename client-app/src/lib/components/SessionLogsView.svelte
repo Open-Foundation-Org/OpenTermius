@@ -74,15 +74,7 @@
 <div class="h-full overflow-y-auto p-4 sm:p-6 space-y-4 sm:space-y-6">
   <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-[#22222a] pb-4">
     <div class="min-w-0">
-      <div class="flex items-center gap-2 flex-wrap">
-        <h2 class="text-base font-bold text-white tracking-tight">Session Logs</h2>
-        <span class="rounded bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 text-[10px] font-semibold text-emerald-400">
-          Audit Trail
-        </span>
-      </div>
-      <p class="text-xs text-neutral-400 mt-1">
-        Connection history, target endpoints, and session duration recorded on this device.
-      </p>
+      <h2 class="text-base font-bold text-white tracking-tight">Session Logs</h2>
     </div>
 
     <div class="flex items-center gap-2 shrink-0">

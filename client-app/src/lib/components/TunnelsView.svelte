@@ -260,15 +260,7 @@
   <!-- Header Banner -->
   <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-[#22222a] pb-4">
     <div class="min-w-0">
-      <div class="flex items-center gap-2 flex-wrap">
-        <h2 class="text-base font-bold text-white tracking-tight">Port Forwarding</h2>
-        <span class="rounded bg-emerald-500/10 px-2 py-0.5 text-[10px] font-semibold text-emerald-400 border border-emerald-500/20">
-          SSH Tunnel
-        </span>
-      </div>
-      <p class="text-xs text-neutral-400 mt-1">
-        Forward local ports, remote ports, or a SOCKS5 proxy over SSH.
-      </p>
+      <h2 class="text-base font-bold text-white tracking-tight">Port Forwarding</h2>
     </div>
 
     <div class="flex items-center gap-2 shrink-0">

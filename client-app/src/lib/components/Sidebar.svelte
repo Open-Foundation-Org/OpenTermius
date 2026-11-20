@@ -28,6 +28,8 @@
     onToggleCollapse?: () => void;
     isMobileOpen?: boolean;
     onCloseMobile?: () => void;
+    gatewayOnline?: boolean;
+    onSwitchToGateway?: () => void;
   }
 
   let {
@@ -39,7 +41,9 @@
     isCollapsed = false,
     onToggleCollapse,
     isMobileOpen = false,
-    onCloseMobile
+    onCloseMobile,
+    gatewayOnline = true,
+    onSwitchToGateway
   }: Props = $props();
 
   function handleNavClick(navId: string) {
@@ -142,7 +146,6 @@
       >
         <div class="flex items-center justify-between text-[10px] font-mono uppercase tracking-wider text-zinc-500 mb-0.5">
           <span>{activeVault?.type === 'team' ? 'Team Vault' : 'Personal Vault'}</span>
-          <span class="text-emerald-400">E2EE</span>
         </div>
         <div class="flex items-center justify-between font-medium text-xs text-zinc-100">
           <div class="flex items-center gap-2 truncate">
@@ -213,16 +216,31 @@
 
   <!-- Bottom Connection Status -->
   <div class="border-t border-white/[0.06] pt-2.5">
-    <div class="flex items-center justify-between rounded-lg bg-[#141418] px-2.5 py-1.5 border border-white/[0.06]">
-      <div class="flex items-center gap-2 truncate">
-        <span class="h-1.5 w-1.5 rounded-full {api.isStandalone() ? 'bg-zinc-400' : 'bg-emerald-400'} shrink-0"></span>
-        <span class="text-[11px] font-medium text-zinc-300 truncate">
-          {api.isStandalone() ? 'Standalone' : 'Gateway'}
+    {#if api.isStandalone()}
+      <button
+        type="button"
+        onclick={() => onSwitchToGateway?.()}
+        class="flex w-full items-center justify-between rounded-lg bg-[#141418] px-2.5 py-1.5 border border-white/[0.06] hover:border-indigo-500/30 transition cursor-pointer"
+        title="Switch to Self-Hosted Gateway"
+      >
+        <div class="flex items-center gap-2 truncate">
+          <span class="h-1.5 w-1.5 rounded-full bg-indigo-400 shrink-0"></span>
+          <span class="text-[11px] font-medium text-indigo-300 truncate">Standalone</span>
+        </div>
+        <span class="text-[10px] text-zinc-500 shrink-0 font-mono">local</span>
+      </button>
+    {:else}
+      <div class="flex items-center justify-between rounded-lg px-2.5 py-1.5 border {gatewayOnline ? 'bg-emerald-500/10 border-emerald-500/25' : 'bg-amber-500/10 border-amber-500/25'}">
+        <div class="flex items-center gap-2 truncate">
+          <span class="h-1.5 w-1.5 rounded-full {gatewayOnline ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'} shrink-0"></span>
+          <span class="text-[11px] font-medium {gatewayOnline ? 'text-emerald-300' : 'text-amber-300'} truncate">
+            {gatewayOnline ? 'Online · Gateway' : 'Offline · Local'}
+          </span>
+        </div>
+        <span class="text-[10px] text-zinc-400 shrink-0 font-mono truncate max-w-[85px]">
+          {api.getApiBase().replace(/^https?:\/\//, '').split('/')[0]}
         </span>
       </div>
-      <span class="text-[10px] text-zinc-500 shrink-0 font-mono truncate max-w-[95px]">
-        {api.isStandalone() ? 'local' : api.getApiBase().replace(/^https?:\/\//, '').split('/')[0]}
-      </span>
-    </div>
+    {/if}
   </div>
 </aside>

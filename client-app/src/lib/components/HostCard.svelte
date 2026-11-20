@@ -7,8 +7,7 @@
     FolderInput,
     Folder,
     MoreVertical,
-    Copy,
-    ArrowUpRight
+    Copy
   } from '@lucide/svelte';
   import { platform } from '../stores/platform.svelte';
   import { toast } from '../stores/toast.svelte';
@@ -88,22 +87,12 @@
         </div>
       </div>
 
-      <div class="flex items-center gap-1 shrink-0" onclick={(e) => e.stopPropagation()} role="presentation">
-        {#if onOpenSftp}
-          <button
-            type="button"
-            onclick={() => onOpenSftp(host)}
-            class="flex h-9 w-9 items-center justify-center rounded-lg text-zinc-400 hover:text-zinc-100 hover:bg-white/[0.06] active:bg-white/[0.1] transition"
-            aria-label="Open SFTP"
-          >
-            <Folder class="h-4 w-4" />
-          </button>
-        {/if}
+      <div class="flex items-center shrink-0" onclick={(e) => e.stopPropagation()} role="presentation">
         <button
           type="button"
           onclick={() => (isMenuOpen = !isMenuOpen)}
-          class="flex h-9 w-9 items-center justify-center rounded-lg text-zinc-400 hover:text-zinc-100 hover:bg-white/[0.06] active:bg-white/[0.1] transition"
-          aria-label="More options"
+          class="flex h-9 w-9 items-center justify-center rounded-lg text-zinc-400 hover:text-zinc-100 hover:bg-white/[0.06] active:bg-white/[0.1] transition cursor-pointer"
+          aria-label="Host options"
         >
           <MoreVertical class="h-4 w-4" />
         </button>
@@ -186,15 +175,15 @@
     {/if}
   </div>
 {:else}
-  <!-- Desktop Precision Host Card (Click to Connect, Monochrome Surface + Single Emerald Accent) -->
-  <div
-    onclick={() => onConnect(host)}
-    onkeydown={(e) => e.key === 'Enter' && onConnect(host)}
-    role="button"
-    tabindex="0"
-    class="group relative flex flex-col justify-between rounded-xl border border-white/[0.07] bg-[#131317] p-3.5 transition-all duration-150 hover:border-white/[0.15] hover:bg-[#17171c] cursor-pointer"
-  >
-    <div class="flex items-start justify-between gap-3">
+  <!-- Desktop Ultra-Clean Host Card (Click to Connect, single ⋮ menu) -->
+  <div class="relative">
+    <div
+      onclick={() => onConnect(host)}
+      onkeydown={(e) => e.key === 'Enter' && onConnect(host)}
+      role="button"
+      tabindex="0"
+      class="group flex items-center justify-between gap-3 rounded-xl border border-white/[0.06] bg-[#121217] px-3.5 py-3 transition-all duration-150 hover:border-emerald-500/30 hover:bg-[#16161d] cursor-pointer"
+    >
       <div class="flex items-center gap-3 min-w-0 flex-1">
         <div class="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-white/[0.04] border border-white/[0.06] text-zinc-400 group-hover:text-emerald-400 group-hover:border-emerald-500/25 transition-colors">
           {#if host.useMosh}
@@ -206,7 +195,7 @@
 
         <div class="min-w-0 flex-1">
           <div class="flex items-center gap-2">
-            <h3 class="text-[13.5px] font-semibold tracking-tight text-zinc-100 group-hover:text-white truncate">
+            <h3 class="text-[13px] font-semibold tracking-tight text-zinc-100 group-hover:text-white truncate">
               {host.label}
             </h3>
             {#if host.useMosh}
@@ -216,88 +205,103 @@
             {/if}
           </div>
           <p
-            class="text-[11.5px] text-zinc-400 font-mono truncate mt-0.5"
+            class="text-[11px] text-zinc-400 font-mono truncate mt-0.5"
             title={`${host.username}@${host.address}:${host.port}`}
           >
-            {host.username}@{host.address}:{host.port}
+            {host.username}@{host.address}{#if host.port && host.port !== 22}:{host.port}{/if}
           </p>
+          {#if host.tags && host.tags.length > 0}
+            <div class="flex items-center gap-1 mt-1.5 overflow-hidden">
+              {#each host.tags.slice(0, 3) as tag}
+                <span class="rounded bg-white/[0.04] px-1.5 py-0.5 text-[10px] font-mono text-zinc-400 truncate">
+                  {tag}
+                </span>
+              {/each}
+            </div>
+          {/if}
         </div>
       </div>
 
-      <span class="rounded-md bg-white/[0.03] border border-white/[0.06] px-2 py-0.5 text-[10px] font-medium text-zinc-400 shrink-0">
-        {host.group || 'Default'}
-      </span>
+      <div class="shrink-0" onclick={(e) => e.stopPropagation()} role="presentation">
+        <button
+          type="button"
+          onclick={() => (isMenuOpen = !isMenuOpen)}
+          class="flex h-8 w-8 items-center justify-center rounded-lg text-zinc-400 hover:text-white hover:bg-white/[0.08] transition cursor-pointer"
+          title="Host options"
+          aria-label="Host options"
+        >
+          <MoreVertical class="h-4 w-4" />
+        </button>
+      </div>
     </div>
 
-    <div
-      class="mt-3 pt-2.5 border-t border-white/[0.05] flex items-center justify-between gap-2"
-      onclick={(e) => e.stopPropagation()}
-      role="presentation"
-    >
-      <div class="flex items-center gap-1 min-w-0 overflow-hidden">
-        {#if host.tags && host.tags.length > 0}
-          {#each host.tags.slice(0, 2) as tag}
-            <span class="rounded bg-white/[0.04] px-1.5 py-0.5 text-[10px] font-mono text-zinc-400 truncate">
-              {tag}
-            </span>
-          {/each}
-        {:else}
-          <span class="text-[10.5px] font-mono text-zinc-500">SSH · Port {host.port || 22}</span>
-        {/if}
-      </div>
-
-      <div class="flex items-center gap-1 shrink-0">
+    {#if isMenuOpen}
+      <div
+        class="fixed inset-0 z-40"
+        onclick={() => (isMenuOpen = false)}
+        role="presentation"
+      ></div>
+      <div
+        class="absolute right-2 top-12 z-50 w-44 rounded-xl border border-white/[0.1] bg-[#14141c] p-1.5 shadow-2xl space-y-0.5 text-xs animate-in fade-in zoom-in-95 duration-100"
+        onclick={(e) => e.stopPropagation()}
+        onkeydown={(e) => { if (e.key === 'Escape') isMenuOpen = false; }}
+        role="menu"
+        tabindex="-1"
+      >
+        <button
+          type="button"
+          onclick={() => { isMenuOpen = false; onConnect(host); }}
+          class="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-emerald-400 font-medium hover:bg-white/[0.06] transition cursor-pointer"
+        >
+          <Terminal class="h-3.5 w-3.5" /> Connect SSH
+        </button>
         {#if onOpenSftp}
           <button
             type="button"
-            onclick={() => onOpenSftp(host)}
-            class="flex items-center gap-1 rounded-md bg-white/[0.04] border border-white/[0.06] px-2 py-1 text-[11px] font-medium text-zinc-300 hover:text-white hover:bg-white/[0.08] transition"
-            title="Open SFTP File Browser"
+            onclick={() => { isMenuOpen = false; onOpenSftp(host); }}
+            class="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-zinc-200 hover:bg-white/[0.06] transition cursor-pointer"
           >
-            <Folder class="h-3 w-3 text-zinc-400" />
-            <span>SFTP</span>
+            <Folder class="h-3.5 w-3.5 text-zinc-400" /> Browse SFTP
           </button>
+        {/if}
+        <button
+          type="button"
+          onclick={() => { isMenuOpen = false; void copyHostTarget(); }}
+          class="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-zinc-200 hover:bg-white/[0.06] transition cursor-pointer"
+        >
+          <Copy class="h-3.5 w-3.5 text-zinc-400" /> Copy SSH Command
+        </button>
+        {#if onEdit || onMove || onDelete}
+          <div class="my-1 border-t border-white/[0.06]"></div>
         {/if}
         {#if onEdit}
           <button
             type="button"
-            onclick={() => onEdit(host)}
-            class="flex h-6 w-6 items-center justify-center rounded-md text-zinc-400 hover:text-zinc-100 hover:bg-white/[0.07] transition"
-            title="Edit Host"
+            onclick={() => { isMenuOpen = false; onEdit(host); }}
+            class="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-zinc-200 hover:bg-white/[0.06] transition cursor-pointer"
           >
-            <Pencil class="h-3 w-3" />
+            <Pencil class="h-3.5 w-3.5 text-zinc-400" /> Edit Host
           </button>
         {/if}
         {#if onMove}
           <button
             type="button"
-            onclick={() => onMove(host)}
-            class="flex h-6 w-6 items-center justify-center rounded-md text-zinc-400 hover:text-zinc-100 hover:bg-white/[0.07] transition"
-            title="Move Host"
+            onclick={() => { isMenuOpen = false; onMove(host); }}
+            class="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-zinc-200 hover:bg-white/[0.06] transition cursor-pointer"
           >
-            <FolderInput class="h-3 w-3" />
+            <FolderInput class="h-3.5 w-3.5 text-zinc-400" /> Move Host
           </button>
         {/if}
         {#if onDelete}
           <button
             type="button"
-            onclick={() => onDelete(host)}
-            class="flex h-6 w-6 items-center justify-center rounded-md text-zinc-400 hover:text-rose-400 hover:bg-rose-500/10 transition"
-            title="Delete Host"
+            onclick={() => { isMenuOpen = false; onDelete(host); }}
+            class="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-rose-400 hover:bg-rose-500/15 transition cursor-pointer"
           >
-            <Trash2 class="h-3 w-3" />
+            <Trash2 class="h-3.5 w-3.5" /> Delete Host
           </button>
         {/if}
-        <button
-          type="button"
-          onclick={() => onConnect(host)}
-          class="flex items-center gap-1 rounded-md bg-emerald-500/15 border border-emerald-500/30 px-2 py-1 text-[11px] font-semibold text-emerald-300 hover:bg-emerald-500 hover:text-zinc-950 transition"
-          title="Connect SSH"
-        >
-          <span>Connect</span>
-          <ArrowUpRight class="h-3 w-3" />
-        </button>
       </div>
-    </div>
+    {/if}
   </div>
 {/if}

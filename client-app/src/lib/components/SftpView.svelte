@@ -3,7 +3,7 @@
   import { platform } from '../stores/platform.svelte';
   import { toast } from '../stores/toast.svelte';
   import SftpPane, { type SftpHostItem } from './SftpPane.svelte';
-  import { ArrowRight, ArrowLeft, Copy, Scissors } from '@lucide/svelte';
+  import { ArrowRight, ArrowLeft, Copy, Scissors, Folder, FileText } from '@lucide/svelte';
 
   interface Props {
     hosts: SftpHostItem[];
@@ -101,32 +101,97 @@
     await api.sftpDelete(cfg, filePath);
   }
 
-  async function transferFiles(direction: 'left-to-right' | 'right-to-left', move: boolean) {
-    const srcTarget = direction === 'left-to-right' ? leftTargetId : rightTargetId;
-    const dstTarget = direction === 'left-to-right' ? rightTargetId : leftTargetId;
-    const dstPath = direction === 'left-to-right' ? rightPath : leftPath;
-    const selected = direction === 'left-to-right' ? leftSelection : rightSelection;
-    const srcItems = direction === 'left-to-right' ? leftItems : rightItems;
+  async function listDirFromTarget(targetId: string, dirPath: string): Promise<ApiSftpFile[]> {
+    if (targetId === 'local') {
+      const { invoke } = await import('@tauri-apps/api/core');
+      const res = await invoke<{ path: string; items: ApiSftpFile[] }>('local_fs_list', { path: dirPath });
+      return res.items || [];
+    }
+    const cfg = hostConfigFor(targetId);
+    if (!cfg) throw new Error('Source host not found');
+    const res = await api.sftpList(cfg, dirPath);
+    return res.items || [];
+  }
 
-    if (!srcTarget || !dstTarget || !dstPath || selected.length === 0) return;
+  async function mkdirOnTarget(targetId: string, dirPath: string): Promise<void> {
+    if (targetId === 'local') {
+      const { invoke } = await import('@tauri-apps/api/core');
+      await invoke('local_fs_mkdir', { path: dirPath });
+      return;
+    }
+    const cfg = hostConfigFor(targetId);
+    if (!cfg) throw new Error('Destination host not found');
+    await api.sftpMkdir(cfg, dirPath);
+  }
 
-    const filesToTransfer = srcItems.filter((item) => selected.includes(item.path) && !item.isDir);
-    if (filesToTransfer.length === 0) return;
+  function joinPath(base: string, name: string): string {
+    const clean = base.endsWith('/') && base.length > 1 ? base.slice(0, -1) : base;
+    return clean === '/' ? `/${name}` : `${clean}/${name}`;
+  }
+
+  async function transferSingleEntry(
+    srcTarget: string,
+    dstTarget: string,
+    item: ApiSftpFile,
+    dstDir: string,
+    move: boolean
+  ): Promise<void> {
+    if (!item.isDir) {
+      transferStatus = `${move ? 'Moving' : 'Copying'} ${item.name}...`;
+      const bytes = await readBytesFromTarget(srcTarget, item.path);
+      await writeBytesToTarget(dstTarget, dstDir, item.name, bytes);
+      if (move) {
+        await deleteFromTarget(srcTarget, item.path);
+      }
+      return;
+    }
+
+    const newDir = joinPath(dstDir, item.name);
+    transferStatus = `${move ? 'Moving' : 'Copying'} folder ${item.name}...`;
+    try {
+      await mkdirOnTarget(dstTarget, newDir);
+    } catch {
+      // Destination folder may already exist
+    }
+
+    const children = await listDirFromTarget(srcTarget, item.path);
+    for (const child of children) {
+      await transferSingleEntry(srcTarget, dstTarget, child, newDir, move);
+    }
+
+    if (move) {
+      await deleteFromTarget(srcTarget, item.path);
+    }
+  }
+
+  async function runTransfer(
+    srcTarget: string,
+    dstTarget: string,
+    entries: ApiSftpFile[],
+    dstDir: string,
+    move: boolean
+  ) {
+    if (!srcTarget || !dstTarget || !dstDir || entries.length === 0 || isTransferring) return;
+
+    const validEntries = entries.filter((item) => {
+      if (srcTarget === dstTarget) {
+        if (dstDir === item.path || dstDir.startsWith(`${item.path}/`)) return false;
+        const parent = item.path.slice(0, item.path.lastIndexOf('/')) || '/';
+        if (parent === dstDir) return false;
+      }
+      return true;
+    });
+    if (validEntries.length === 0) return;
 
     isTransferring = true;
     try {
-      for (let i = 0; i < filesToTransfer.length; i++) {
-        const item = filesToTransfer[i];
-        transferStatus = `${move ? 'Moving' : 'Copying'} ${item.name} (${i + 1}/${filesToTransfer.length})...`;
-        const bytes = await readBytesFromTarget(srcTarget, item.path);
-        await writeBytesToTarget(dstTarget, dstPath, item.name, bytes);
-        if (move) {
-          await deleteFromTarget(srcTarget, item.path);
-        }
+      for (const entry of validEntries) {
+        await transferSingleEntry(srcTarget, dstTarget, entry, dstDir, move);
       }
       leftSelection = [];
       rightSelection = [];
       refreshCounter += 1;
+      toast.success(`${move ? 'Moved' : 'Copied'} ${validEntries.length} item${validEntries.length > 1 ? 's' : ''}`);
     } catch (err: unknown) {
       toast.error(err, 'Transfer failed');
     } finally {
@@ -134,7 +199,146 @@
       transferStatus = null;
     }
   }
+
+  async function transferFiles(direction: 'left-to-right' | 'right-to-left', move: boolean) {
+    const srcTarget = direction === 'left-to-right' ? leftTargetId : rightTargetId;
+    const dstTarget = direction === 'left-to-right' ? rightTargetId : leftTargetId;
+    const dstPath = direction === 'left-to-right' ? rightPath : leftPath;
+    const selected = direction === 'left-to-right' ? leftSelection : rightSelection;
+    const srcItems = direction === 'left-to-right' ? leftItems : rightItems;
+    const entries = srcItems.filter((item) => selected.includes(item.path));
+    await runTransfer(srcTarget, dstTarget, entries, dstPath, move);
+  }
+
+  async function handleDropTransfer(
+    toPane: 'left' | 'right',
+    payload: { fromPane: 'left' | 'right'; paths: string[]; destDir: string; move?: boolean }
+  ) {
+    const srcTarget = payload.fromPane === 'left' ? leftTargetId : rightTargetId;
+    const dstTarget = toPane === 'left' ? leftTargetId : rightTargetId;
+    const srcItems = payload.fromPane === 'left' ? leftItems : rightItems;
+    const entries = srcItems.filter((item) => payload.paths.includes(item.path));
+    const isMove = payload.move ?? payload.fromPane === toPane;
+    await runTransfer(srcTarget, dstTarget, entries, payload.destDir, isMove);
+  }
+
+  interface SftpDragState {
+    fromPane: 'left' | 'right';
+    paths: string[];
+    label: string;
+    isDir: boolean;
+    pointerId: number;
+    pointerType: string;
+    startX: number;
+    startY: number;
+    x: number;
+    y: number;
+    active: boolean;
+    moveMode: boolean;
+    hoverPane: 'left' | 'right' | null;
+    hoverFolderPath: string | null;
+  }
+
+  let dragState = $state<SftpDragState | null>(null);
+  let suppressClickUntil = 0;
+
+  function suppressNextClick(): boolean {
+    return Date.now() < suppressClickUntil;
+  }
+
+  function startPaneDrag(pane: 'left' | 'right', e: PointerEvent, item: ApiSftpFile) {
+    if (isTransferring) return;
+    if (e.pointerType === 'touch') return; // Touch uses checkboxes + Copy/Move bar so vertical scroll stays smooth
+    const selected = pane === 'left' ? leftSelection : rightSelection;
+    const paths = selected.includes(item.path) && selected.length > 0 ? [...selected] : [item.path];
+    dragState = {
+      fromPane: pane,
+      paths,
+      label: paths.length > 1 ? `${paths.length} items` : item.name,
+      isDir: paths.length === 1 && item.isDir,
+      pointerId: e.pointerId,
+      pointerType: e.pointerType,
+      startX: e.clientX,
+      startY: e.clientY,
+      x: e.clientX,
+      y: e.clientY,
+      active: false,
+      moveMode: e.shiftKey,
+      hoverPane: null,
+      hoverFolderPath: null
+    };
+  }
+
+  function updateDragHover(clientX: number, clientY: number, shiftKey: boolean) {
+    if (!dragState) return;
+    const els = document.elementsFromPoint(clientX, clientY);
+    let hoverPane: 'left' | 'right' | null = null;
+    let hoverFolderPath: string | null = null;
+
+    for (const el of els) {
+      if (!(el instanceof HTMLElement)) continue;
+      if (!hoverFolderPath && el.dataset.sftpFolder && (el.dataset.sftpFolderPane === 'left' || el.dataset.sftpFolderPane === 'right')) {
+        hoverFolderPath = el.dataset.sftpFolder;
+        hoverPane = el.dataset.sftpFolderPane;
+        break;
+      }
+      if (!hoverPane && (el.dataset.sftpPane === 'left' || el.dataset.sftpPane === 'right')) {
+        hoverPane = el.dataset.sftpPane;
+        break;
+      }
+    }
+
+    dragState.hoverPane = hoverPane;
+    dragState.hoverFolderPath = hoverFolderPath;
+    dragState.moveMode = shiftKey || (hoverPane === dragState.fromPane && Boolean(hoverFolderPath));
+  }
+
+  function handleWindowPointerMove(e: PointerEvent) {
+    if (!dragState || e.pointerId !== dragState.pointerId) return;
+    dragState.x = e.clientX;
+    dragState.y = e.clientY;
+    if (!dragState.active) {
+      if (Math.hypot(e.clientX - dragState.startX, e.clientY - dragState.startY) < 6) return;
+      dragState.active = true;
+    }
+    updateDragHover(e.clientX, e.clientY, e.shiftKey);
+  }
+
+  function handleWindowPointerUp(e: PointerEvent) {
+    if (!dragState || e.pointerId !== dragState.pointerId) return;
+    const current = dragState;
+    dragState = null;
+
+    if (!current.active) return;
+    suppressClickUntil = Date.now() + 250;
+
+    if (!current.hoverPane) return;
+    const destDir = current.hoverFolderPath || (current.hoverPane === 'left' ? leftPath : rightPath);
+    if (!destDir) return;
+    if (current.hoverPane === current.fromPane && !current.hoverFolderPath) return;
+
+    void handleDropTransfer(current.hoverPane, {
+      fromPane: current.fromPane,
+      paths: current.paths,
+      destDir,
+      move: current.moveMode
+    });
+  }
+
+  function handleWindowKeyChange(e: KeyboardEvent) {
+    if (!dragState?.active) return;
+    dragState.moveMode =
+      e.shiftKey || (dragState.hoverPane === dragState.fromPane && Boolean(dragState.hoverFolderPath));
+  }
 </script>
+
+<svelte:window
+  onpointermove={handleWindowPointerMove}
+  onpointerup={handleWindowPointerUp}
+  onpointercancel={handleWindowPointerUp}
+  onkeydown={handleWindowKeyChange}
+  onkeyup={handleWindowKeyChange}
+/>
 
 <div class="flex h-full flex-col bg-[#0a0a0c] p-3 gap-2.5 overflow-hidden">
   <!-- Dual-Pane Transfer Bar -->
@@ -147,7 +351,7 @@
         </span>
       {:else}
         <span class="text-[11px] text-neutral-400 hidden sm:inline">
-          Select files in either pane to Copy or Move across Local & Remote hosts
+          Drag between panes to Copy (hold Shift to Move), or drop onto a folder
         </span>
       {/if}
     </div>
@@ -217,6 +421,7 @@
     <div class="flex-1 min-h-0">
       {#if mobileActivePane === 'left'}
         <SftpPane
+          paneId="left"
           paneTitle="Left"
           {hosts}
           targetId={leftTargetId}
@@ -226,10 +431,16 @@
           currentPath={leftPath}
           onPathChange={(p) => (leftPath = p)}
           onItemsLoaded={(items) => (leftItems = items)}
+          onStartDrag={(e, item) => startPaneDrag('left', e, item)}
+          dragHoverPane={dragState?.active ? dragState.hoverPane : null}
+          dragHoverFolderPath={dragState?.active ? dragState.hoverFolderPath : null}
+          dragSourcePane={dragState?.active ? dragState.fromPane : null}
+          {suppressNextClick}
           refreshSignal={refreshCounter}
         />
       {:else}
         <SftpPane
+          paneId="right"
           paneTitle="Right"
           {hosts}
           targetId={rightTargetId}
@@ -239,6 +450,11 @@
           currentPath={rightPath}
           onPathChange={(p) => (rightPath = p)}
           onItemsLoaded={(items) => (rightItems = items)}
+          onStartDrag={(e, item) => startPaneDrag('right', e, item)}
+          dragHoverPane={dragState?.active ? dragState.hoverPane : null}
+          dragHoverFolderPath={dragState?.active ? dragState.hoverFolderPath : null}
+          dragSourcePane={dragState?.active ? dragState.fromPane : null}
+          {suppressNextClick}
           refreshSignal={refreshCounter}
         />
       {/if}
@@ -246,6 +462,7 @@
   {:else}
     <div class="grid flex-1 grid-cols-2 gap-2.5 min-h-0">
       <SftpPane
+        paneId="left"
         paneTitle="Left"
         {hosts}
         targetId={leftTargetId}
@@ -255,9 +472,15 @@
         currentPath={leftPath}
         onPathChange={(p) => (leftPath = p)}
         onItemsLoaded={(items) => (leftItems = items)}
+        onStartDrag={(e, item) => startPaneDrag('left', e, item)}
+        dragHoverPane={dragState?.active ? dragState.hoverPane : null}
+        dragHoverFolderPath={dragState?.active ? dragState.hoverFolderPath : null}
+        dragSourcePane={dragState?.active ? dragState.fromPane : null}
+        {suppressNextClick}
         refreshSignal={refreshCounter}
       />
       <SftpPane
+        paneId="right"
         paneTitle="Right"
         {hosts}
         targetId={rightTargetId}
@@ -267,8 +490,32 @@
         currentPath={rightPath}
         onPathChange={(p) => (rightPath = p)}
         onItemsLoaded={(items) => (rightItems = items)}
+        onStartDrag={(e, item) => startPaneDrag('right', e, item)}
+        dragHoverPane={dragState?.active ? dragState.hoverPane : null}
+        dragHoverFolderPath={dragState?.active ? dragState.hoverFolderPath : null}
+        dragSourcePane={dragState?.active ? dragState.fromPane : null}
+        {suppressNextClick}
         refreshSignal={refreshCounter}
       />
     </div>
   {/if}
 </div>
+
+{#if dragState?.active}
+  <div
+    class="pointer-events-none fixed z-[9999] flex items-center gap-2 rounded-lg border bg-[#16161f]/95 px-2.5 py-1.5 text-xs text-white shadow-2xl backdrop-blur-sm {dragState.moveMode ? 'border-amber-500/60' : 'border-emerald-500/60'}"
+    style="left: {dragState.x + 14}px; top: {dragState.y + 14}px;"
+  >
+    {#if dragState.isDir}
+      <Folder class="h-3.5 w-3.5 text-amber-400 shrink-0" />
+    {:else}
+      <FileText class="h-3.5 w-3.5 text-neutral-300 shrink-0" />
+    {/if}
+    <span class="max-w-[180px] truncate font-medium">{dragState.label}</span>
+    <span
+      class="rounded px-1.5 py-0.5 text-[10px] font-semibold {dragState.moveMode ? 'bg-amber-500/20 text-amber-300' : 'bg-emerald-500/20 text-emerald-300'}"
+    >
+      {dragState.moveMode ? 'Move' : 'Copy'}
+    </span>
+  </div>
+{/if}

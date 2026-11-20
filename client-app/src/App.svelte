@@ -77,11 +77,15 @@
   let isMobileMenuOpen = $state(false);
   let isSessionSwitcherOpen = $state(false);
   let isVaultSwitcherOpen = $state(false);
+  let isQuickConnectOpen = $state(false);
+  let quickConnectQuery = $state('');
+  let quickConnectInput = $state<HTMLInputElement | null>(null);
   let isTerminalFocus = $state(false);
   let sftpSelectedHostId = $state('');
   let currentUserId = $state('');
   let gatewayOnline = $state(true);
   let teamPresence = $state<DevicePresence[]>([]);
+  let isTeamLiveExpanded = $state(false);
   let incomingRemoteRequests = $state<RemoteRequest[]>([]);
   let pendingOutboundRequestId = $state<string | null>(null);
 
@@ -90,19 +94,34 @@
     activeNav = 'sftp';
   }
 
+  function openQuickConnect() {
+    if (!isAuthenticated) return;
+    quickConnectQuery = '';
+    isQuickConnectOpen = true;
+    setTimeout(() => quickConnectInput?.focus(), 20);
+  }
+
   function handleKeydown(e: KeyboardEvent) {
     if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'b') {
       e.preventDefault();
       isSidebarCollapsed = !isSidebarCollapsed;
+    } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 't') {
+      e.preventDefault();
+      openQuickConnect();
+    } else if (e.key === 'Escape' && isQuickConnectOpen) {
+      e.preventDefault();
+      isQuickConnectOpen = false;
     }
   }
 
   // Gateway & Standalone Connection State
   let gatewayApiUrl = $state(api.getApiBase());
-  let connectionChoice = $state<'select' | 'gateway' | 'standalone'>('select');
+  let connectionChoice = $state<'select' | 'gateway' | 'standalone'>(
+    api.isStandalone() ? 'standalone' : api.getToken() ? 'gateway' : 'select'
+  );
 
   // Auth State
-  let isAuthenticated = $state(false);
+  let isAuthenticated = $state(api.isStandalone() || Boolean(api.getToken()));
   let authEmail = $state('admin@opentermius.local');
   let authPassword = $state('OpenTermius2026!');
   let authError = $state<string | null>(null);
@@ -124,6 +143,19 @@
     pingMs: number;
     group: string;
   }>>([]);
+
+  let quickConnectHosts = $derived(
+    hosts.filter((h) => {
+      const q = quickConnectQuery.trim().toLowerCase();
+      if (!q) return true;
+      return (
+        h.label.toLowerCase().includes(q) ||
+        h.address.toLowerCase().includes(q) ||
+        h.username.toLowerCase().includes(q) ||
+        (h.group || '').toLowerCase().includes(q)
+      );
+    })
+  );
 
   let filteredHosts = $derived(
     hosts.filter(
@@ -682,7 +714,7 @@
     (window as any).AndroidClipboard?.setKeepAliveSessions?.(count);
   });
 
-  const APP_VERSION = '0.4.5';
+  const APP_VERSION = '0.5.0';
   type DesktopUpdate = Awaited<ReturnType<typeof import('@tauri-apps/plugin-updater').check>>;
   let availableUpdate = $state<DesktopUpdate | null>(null);
   let releaseFallback = $state<{ version: string; url: string } | null>(null);
@@ -788,6 +820,7 @@
       if (isImportOpen) { isImportOpen = false; return; }
       if (isSessionSwitcherOpen) { isSessionSwitcherOpen = false; return; }
       if (isVaultSwitcherOpen) { isVaultSwitcherOpen = false; return; }
+      if (isQuickConnectOpen) { isQuickConnectOpen = false; return; }
 
       const subPages = ['vaults', 'keychain', 'identities', 'snippets', 'logs', 'settings'];
       if (subPages.includes(activeNav)) {
@@ -835,6 +868,11 @@
       onToggleCollapse={() => (isSidebarCollapsed = !isSidebarCollapsed)}
       isMobileOpen={isMobileMenuOpen}
       onCloseMobile={() => (isMobileMenuOpen = false)}
+      {gatewayOnline}
+      onSwitchToGateway={() => {
+        isAuthenticated = false;
+        connectionChoice = 'gateway';
+      }}
     />
   {/if}
 
@@ -955,25 +993,14 @@
         </div>
 
         <div class="flex items-center gap-1.5 shrink-0">
-          {#if activeNav === 'hosts'}
-            <button
-              type="button"
-              onclick={() => (isImportOpen = true)}
-              class="flex h-10 w-10 items-center justify-center rounded-xl text-neutral-300 active:bg-[#1a1a24] transition"
-              title="Import hosts"
-              aria-label="Import hosts"
-            >
-              <Download class="h-4.5 w-4.5" />
-            </button>
-          {/if}
           <button
             type="button"
-            onclick={handleNewLocalTab}
+            onclick={openQuickConnect}
             class="flex h-10 w-10 items-center justify-center rounded-xl bg-[#161620] border border-[#252535] text-emerald-400 active:scale-95 transition"
-            title="Open new terminal shell"
-            aria-label="Open new terminal shell"
+            title="New Connection Tab (⌘T)"
+            aria-label="New Connection Tab"
           >
-            <Terminal class="h-4.5 w-4.5" />
+            <Plus class="h-4.5 w-4.5" />
           </button>
         </div>
       </header>
@@ -1048,54 +1075,12 @@
           {/each}
 
           <button
-            onclick={handleNewLocalTab}
+            onclick={openQuickConnect}
             class="flex items-center justify-center h-7 w-7 rounded-lg border border-[#20202a] bg-[#14141a] text-neutral-400 hover:text-white hover:border-[#30303e] transition shrink-0"
-            title="Open new terminal shell"
-            aria-label="Open new terminal shell"
+            title="New Connection Tab (⌘T / Ctrl+T)"
+            aria-label="New Connection Tab"
           >
             <Plus class="h-3.5 w-3.5" />
-          </button>
-        </div>
-
-        <!-- Quick Actions -->
-        <div class="flex items-center gap-1.5 sm:gap-2 shrink-0">
-          {#if api.isStandalone()}
-            <button
-              type="button"
-              onclick={() => {
-                isAuthenticated = false;
-                connectionChoice = 'gateway';
-              }}
-              class="hidden md:flex items-center gap-1 rounded bg-indigo-500/15 border border-indigo-500/30 px-2 py-1 text-[10px] font-semibold text-indigo-400 hover:bg-indigo-500/25 transition"
-              title="Switch to Gateway"
-            >
-              <Laptop class="h-3 w-3" /> Standalone
-            </button>
-          {:else}
-            <div class="hidden md:flex items-center gap-1.5 rounded px-2.5 py-1 text-[10px] font-semibold border {gatewayOnline ? 'bg-emerald-500/15 border-emerald-500/30 text-emerald-400' : 'bg-amber-500/15 border-amber-500/30 text-amber-300'}">
-              <span class="h-1.5 w-1.5 rounded-full {gatewayOnline ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'}"></span>
-              {gatewayOnline ? 'Online · Gateway' : 'Offline · Local'}
-            </div>
-          {/if}
-
-          <button
-            onclick={() => (isImportOpen = true)}
-            class="flex items-center gap-1.5 rounded-lg border border-[#252535] bg-[#14141d] px-2.5 sm:px-3 py-1.5 text-xs font-semibold text-neutral-300 hover:text-white hover:border-[#38384d] transition active:scale-95"
-            title="Import hosts from SSH config or CSV/JSON"
-          >
-            <Download class="h-3.5 w-3.5 text-neutral-400" />
-            <span class="hidden sm:inline">Import</span>
-          </button>
-
-          <button
-            onclick={() => {
-              editingHost = null;
-              isAddHostOpen = true;
-            }}
-            class="flex items-center gap-1.5 rounded-lg bg-emerald-600 px-2.5 sm:px-3 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-emerald-500 transition active:scale-95"
-          >
-            <Plus class="h-3.5 w-3.5" />
-            <span class="hidden sm:inline">Add Host</span>
           </button>
         </div>
       </header>
@@ -1205,7 +1190,7 @@
                   </div>
                   <div>
                     <h2 class="text-sm font-bold text-white">Connect to Sync Gateway</h2>
-                    <p class="text-[11px] text-neutral-400">Self-Hosted E2EE Vault Sync Server</p>
+                    <p class="text-[11px] text-neutral-400">Self-Hosted Gateway</p>
                   </div>
                 </div>
                 <button
@@ -1302,152 +1287,188 @@
         </div>
       {:else}
         <!-- Hosts Inventory Screen (Persistent in DOM) -->
-        <div class="h-full w-full flex-col p-3 pb-24 sm:p-6 overflow-y-auto space-y-4 sm:space-y-6 {activeNav === 'hosts' ? 'flex' : 'hidden'}">
-          <!-- Search & Filter Controls -->
+        <div class="h-full w-full flex-col px-3.5 pt-3.5 pb-24 sm:px-6 sm:py-5 overflow-y-auto space-y-4 {activeNav === 'hosts' ? 'flex' : 'hidden'}">
+          <!-- Clean Search & Action Toolbar -->
           <div class="space-y-3">
-            <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 sm:gap-3">
+            <div class="flex items-center gap-2 sm:gap-2.5">
               <div class="relative flex-1 max-w-md">
-                <Search class="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-neutral-500" />
+                <Search class="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-zinc-500" />
                 <input
                   type="text"
                   bind:value={searchQuery}
+                  autocapitalize="none"
+                  autocorrect="off"
+                  spellcheck={false}
                   placeholder="Search hosts, IP, or tags..."
-                  class="w-full rounded-xl border border-[#22222a] bg-[#121218] pl-9 pr-9 py-2.5 sm:py-2 text-sm sm:text-xs text-white placeholder-neutral-500 outline-none focus:border-emerald-500 transition"
+                  class="w-full rounded-xl border border-white/[0.08] bg-[#121218] pl-9 pr-9 py-2.5 sm:py-2 text-sm sm:text-xs text-white placeholder-zinc-500 outline-none focus:border-emerald-500/60 transition"
                 />
                 {#if searchQuery}
                   <button
                     type="button"
                     onclick={() => (searchQuery = '')}
-                    class="absolute right-2.5 top-1/2 -translate-y-1/2 rounded-lg p-1 text-neutral-400 hover:text-white"
+                    class="absolute right-2.5 top-1/2 -translate-y-1/2 rounded-lg p-1 text-zinc-400 hover:text-white"
                     aria-label="Clear search"
                   >
                     <X class="h-3.5 w-3.5" />
                   </button>
                 {/if}
               </div>
-              <div class="flex items-center justify-between sm:justify-start gap-2 text-xs text-neutral-400">
+
+              <div class="flex items-center gap-1.5 sm:gap-2 shrink-0 ml-auto">
+                <span class="hidden md:inline text-[11px] font-mono text-zinc-500 mr-1">
+                  {filteredHosts.length} {filteredHosts.length === 1 ? 'host' : 'hosts'}
+                </span>
                 <button
+                  type="button"
                   onclick={loadHosts}
-                  class="flex items-center gap-1.5 rounded-lg bg-[#181822] px-3 py-1.5 text-neutral-300 hover:text-white active:scale-95 transition"
+                  class="flex h-10 w-10 sm:h-8 sm:w-8 items-center justify-center rounded-xl sm:rounded-lg border border-white/[0.07] bg-[#14141b] text-zinc-400 hover:text-white hover:border-white/[0.14] active:scale-95 transition cursor-pointer"
+                  title="Refresh hosts"
+                  aria-label="Refresh hosts"
                 >
-                  <RefreshCw class="h-3 w-3" /> Refresh
+                  <RefreshCw class="h-4 w-4 sm:h-3.5 sm:w-3.5" />
                 </button>
-                <span><span class="font-medium text-white">{filteredHosts.length}</span> hosts in vault</span>
+                {#if !platform.isMobile}
+                  <button
+                    type="button"
+                    onclick={() => {
+                      editingHost = null;
+                      isAddHostOpen = true;
+                    }}
+                    class="flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-500 active:scale-95 transition cursor-pointer"
+                  >
+                    <Plus class="h-3.5 w-3.5" />
+                    <span>New Host</span>
+                  </button>
+                {/if}
               </div>
             </div>
 
-            <!-- Folder Filter Pills -->
-            {#if availableFolders.length > 0}
-              <div class="flex items-center gap-1.5 overflow-x-auto pb-1 text-xs select-none">
-                <span class="text-[11px] font-semibold text-neutral-400 mr-1">Folders:</span>
+            <!-- Folder Filter Pills (only shown when >1 folder exists) -->
+            {#if availableFolders.length > 1}
+              <div class="flex items-center gap-1.5 overflow-x-auto no-scrollbar pb-0.5 text-xs select-none">
                 <button
                   type="button"
                   onclick={() => (selectedFolderFilter = 'all')}
-                  class="rounded-lg px-2.5 py-1 transition flex items-center gap-1.5 {selectedFolderFilter === 'all' ? 'bg-emerald-600 text-white font-medium shadow-sm' : 'bg-[#14141d] border border-[#22222f] text-neutral-400 hover:text-white'}"
+                  class="rounded-full px-3 py-1 transition flex items-center gap-1.5 shrink-0 cursor-pointer {selectedFolderFilter === 'all' ? 'bg-emerald-500/15 border border-emerald-500/35 text-emerald-300 font-medium' : 'bg-[#131319] border border-white/[0.06] text-zinc-400 hover:text-zinc-200'}"
                 >
                   <span>All</span>
-                  <span class="rounded bg-black/30 px-1 py-0.2 text-[10px]">{hosts.length}</span>
+                  <span class="text-[10px] font-mono opacity-75">{hosts.length}</span>
                 </button>
                 {#each availableFolders as folder}
                   {@const count = hosts.filter((h) => (h.group || 'Default') === folder).length}
                   <button
                     type="button"
                     onclick={() => (selectedFolderFilter = folder)}
-                    class="rounded-lg px-2.5 py-1 transition flex items-center gap-1.5 {selectedFolderFilter === folder ? 'bg-emerald-600 text-white font-medium shadow-sm' : 'bg-[#14141d] border border-[#22222f] text-neutral-400 hover:text-white'}"
+                    class="rounded-full px-3 py-1 transition flex items-center gap-1.5 shrink-0 cursor-pointer {selectedFolderFilter === folder ? 'bg-emerald-500/15 border border-emerald-500/35 text-emerald-300 font-medium' : 'bg-[#131319] border border-white/[0.06] text-zinc-400 hover:text-zinc-200'}"
                   >
-                    <Folder class="h-3 w-3" />
+                    <Folder class="h-3 w-3 opacity-75" />
                     <span>{folder}</span>
-                    <span class="rounded bg-black/30 px-1 py-0.2 text-[10px]">{count}</span>
+                    <span class="text-[10px] font-mono opacity-75">{count}</span>
                   </button>
                 {/each}
               </div>
             {/if}
 
-            <!-- Live Team Sessions (Request Remote via Gateway Relay) -->
+            <!-- Live Team Sessions (Collapsible, collapsed by default) -->
             {#if activeVault?.type === 'team' && gatewayOnline}
               {@const activeTeamPeers = teamPresence.filter((p) => p.online && p.active_sessions.length > 0 && p.device_id !== api.getDeviceId())}
+              {@const totalLiveSessions = activeTeamPeers.reduce((n, p) => n + p.active_sessions.length, 0)}
               {#if activeTeamPeers.length > 0}
-                <div class="rounded-xl border border-white/[0.08] bg-[#131317] p-3 space-y-2">
-                  <div class="flex items-center justify-between">
-                    <span class="text-[11px] font-mono font-semibold text-emerald-400 uppercase tracking-wider">
-                      Team Live SSH ({activeTeamPeers.reduce((n, p) => n + p.active_sessions.length, 0)})
+                <div class="rounded-xl border border-white/[0.08] bg-[#131317] overflow-hidden">
+                  <button
+                    type="button"
+                    onclick={() => (isTeamLiveExpanded = !isTeamLiveExpanded)}
+                    class="flex w-full items-center justify-between px-3 py-2 text-left hover:bg-white/[0.03] transition cursor-pointer"
+                  >
+                    <span class="flex items-center gap-2 text-[11px] font-mono font-semibold text-emerald-400 uppercase tracking-wider">
+                      <span class="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                      Team Live SSH ({totalLiveSessions})
                     </span>
-                    <span class="text-[10px] font-mono text-zinc-500">Blind Binary Relay</span>
-                  </div>
-                  <div class="space-y-1.5">
-                    {#each activeTeamPeers as peer (peer.user_id + peer.device_id)}
-                      {#each peer.active_sessions as sess (sess.session_id)}
-                        <div class="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-[#0e0e11] border border-white/[0.06] px-3 py-2 text-xs">
-                          <div class="flex items-center gap-2.5 min-w-0">
-                            <div class="flex -space-x-1.5 shrink-0">
-                              {#if sess.viewers && sess.viewers.length > 0}
-                                {#each sess.viewers as v (v.user_id + v.mode)}
+                    <span class="flex items-center gap-1 text-[11px] text-neutral-400">
+                      <span>{isTeamLiveExpanded ? 'Hide' : 'Expand'}</span>
+                      {#if isTeamLiveExpanded}
+                        <ChevronDown class="h-3.5 w-3.5" />
+                      {:else}
+                        <ChevronRight class="h-3.5 w-3.5" />
+                      {/if}
+                    </span>
+                  </button>
+                  {#if isTeamLiveExpanded}
+                    <div class="border-t border-white/[0.06] p-2.5 space-y-1.5">
+                      {#each activeTeamPeers as peer (peer.user_id + peer.device_id)}
+                        {#each peer.active_sessions as sess (sess.session_id)}
+                          <div class="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-[#0e0e11] border border-white/[0.06] px-3 py-2 text-xs">
+                            <div class="flex items-center gap-2.5 min-w-0">
+                              <div class="flex -space-x-1.5 shrink-0">
+                                {#if sess.viewers && sess.viewers.length > 0}
+                                  {#each sess.viewers as v (v.user_id + v.mode)}
+                                    <span
+                                      title="{v.user_name} ({v.mode === 'host' ? 'Host' : v.mode === 'control' ? 'Control' : 'View'})"
+                                      class="inline-flex h-6 w-6 items-center justify-center rounded-full text-[10px] font-bold ring-2 ring-[#0e0e11] {getAvatarTone(v.user_id || v.user_name)}"
+                                    >
+                                      {getAvatarInitials(v.user_name)}
+                                    </span>
+                                  {/each}
+                                {:else}
                                   <span
-                                    title="{v.user_name} ({v.mode === 'host' ? 'Host' : v.mode === 'control' ? 'Control' : 'View'})"
-                                    class="inline-flex h-6 w-6 items-center justify-center rounded-full text-[10px] font-bold ring-2 ring-[#0e0e11] {getAvatarTone(v.user_id || v.user_name)}"
+                                    title="{peer.user_name} (Host)"
+                                    class="inline-flex h-6 w-6 items-center justify-center rounded-full text-[10px] font-bold ring-2 ring-[#0e0e11] {getAvatarTone(peer.user_id || peer.user_name)}"
                                   >
-                                    {getAvatarInitials(v.user_name)}
+                                    {getAvatarInitials(peer.user_name)}
                                   </span>
-                                {/each}
-                              {:else}
-                                <span
-                                  title="{peer.user_name} (Host)"
-                                  class="inline-flex h-6 w-6 items-center justify-center rounded-full text-[10px] font-bold ring-2 ring-[#0e0e11] {getAvatarTone(peer.user_id || peer.user_name)}"
+                                {/if}
+                              </div>
+                              <div class="min-w-0">
+                                <p class="font-semibold text-zinc-100 truncate">{sess.host_label}</p>
+                                <p class="text-[11px] text-zinc-400 font-mono truncate">
+                                  {peer.user_name} · {peer.platform}
+                                  {#if sess.viewers && sess.viewers.length > 1}
+                                    · {sess.viewers.length} connected
+                                  {/if}
+                                </p>
+                              </div>
+                            </div>
+                            <div class="w-full sm:w-auto grid grid-cols-2 sm:flex items-center gap-1.5 shrink-0">
+                              {#if sess.approved_request_id}
+                                <button
+                                  type="button"
+                                  onclick={() =>
+                                    handleRejoinRemote(
+                                      sess.session_id,
+                                      sess.vault_id,
+                                      sess.host_label,
+                                      sess.approved_request_id!,
+                                      sess.approved_mode || 'view',
+                                      peer.user_name
+                                    )}
+                                  class="col-span-2 w-full sm:w-auto rounded-lg bg-emerald-600 px-3 py-2 sm:py-1.5 text-[11px] font-semibold text-white hover:bg-emerald-500 active:scale-[0.99] transition"
                                 >
-                                  {getAvatarInitials(peer.user_name)}
-                                </span>
+                                  Rejoin ({sess.approved_mode === 'control' ? 'Control' : 'View'})
+                                </button>
+                              {:else}
+                                <button
+                                  type="button"
+                                  disabled={Boolean(pendingOutboundRequestId)}
+                                  onclick={() => handleRequestRemote(sess.session_id, sess.host_label, peer.user_name, 'view')}
+                                  class="rounded-lg bg-white/[0.05] border border-white/[0.08] px-2.5 py-2 sm:py-1.5 text-[11px] font-medium text-zinc-200 hover:bg-white/[0.09] disabled:opacity-50"
+                                >
+                                  Request View
+                                </button>
+                                <button
+                                  type="button"
+                                  disabled={Boolean(pendingOutboundRequestId)}
+                                  onclick={() => handleRequestRemote(sess.session_id, sess.host_label, peer.user_name, 'control')}
+                                  class="rounded-lg bg-emerald-600 px-2.5 py-2 sm:py-1.5 text-[11px] font-semibold text-white hover:bg-emerald-500 disabled:opacity-50"
+                                >
+                                  Request Control
+                                </button>
                               {/if}
                             </div>
-                            <div class="min-w-0">
-                              <p class="font-semibold text-zinc-100 truncate">{sess.host_label}</p>
-                              <p class="text-[11px] text-zinc-400 font-mono truncate">
-                                {peer.user_name} · {peer.platform}
-                                {#if sess.viewers && sess.viewers.length > 1}
-                                  · {sess.viewers.length} connected
-                                {/if}
-                              </p>
-                            </div>
                           </div>
-                          <div class="w-full sm:w-auto grid grid-cols-2 sm:flex items-center gap-1.5 shrink-0">
-                            {#if sess.approved_request_id}
-                              <button
-                                type="button"
-                                onclick={() =>
-                                  handleRejoinRemote(
-                                    sess.session_id,
-                                    sess.vault_id,
-                                    sess.host_label,
-                                    sess.approved_request_id!,
-                                    sess.approved_mode || 'view',
-                                    peer.user_name
-                                  )}
-                                class="col-span-2 w-full sm:w-auto rounded-lg bg-emerald-600 px-3 py-2 sm:py-1.5 text-[11px] font-semibold text-white hover:bg-emerald-500 active:scale-[0.99] transition"
-                              >
-                                Rejoin ({sess.approved_mode === 'control' ? 'Control' : 'View'})
-                              </button>
-                            {:else}
-                              <button
-                                type="button"
-                                disabled={Boolean(pendingOutboundRequestId)}
-                                onclick={() => handleRequestRemote(sess.session_id, sess.host_label, peer.user_name, 'view')}
-                                class="rounded-lg bg-white/[0.05] border border-white/[0.08] px-2.5 py-2 sm:py-1.5 text-[11px] font-medium text-zinc-200 hover:bg-white/[0.09] disabled:opacity-50"
-                              >
-                                Request View
-                              </button>
-                              <button
-                                type="button"
-                                disabled={Boolean(pendingOutboundRequestId)}
-                                onclick={() => handleRequestRemote(sess.session_id, sess.host_label, peer.user_name, 'control')}
-                                class="rounded-lg bg-emerald-600 px-2.5 py-2 sm:py-1.5 text-[11px] font-semibold text-white hover:bg-emerald-500 disabled:opacity-50"
-                              >
-                                Request Control
-                              </button>
-                            {/if}
-                          </div>
-                        </div>
+                        {/each}
                       {/each}
-                    {/each}
-                  </div>
+                    </div>
+                  {/if}
                 </div>
               {/if}
             {/if}
@@ -1457,7 +1478,7 @@
           {#if loadState === 'loading'}
             <div class="flex h-48 items-center justify-center text-xs text-neutral-400 gap-2">
               <RefreshCw class="h-4 w-4 animate-spin text-emerald-400" />
-              <span>Fetching encrypted hosts from backend...</span>
+              <span>Loading hosts...</span>
             </div>
           {:else if loadState === 'error'}
             <div class="rounded-xl border border-rose-500/30 bg-rose-950/20 p-5 flex items-center justify-between">
@@ -1493,10 +1514,10 @@
               </button>
             </div>
           {:else}
-            <!-- Collapsible Folders Sections (flat list on mobile when only Default folder exists) -->
+            <!-- Clean Flat Host Grid (single Default folder) or Borderless Collapsible Folder Sections -->
             {@const folderEntries = Object.entries(hostsByFolder)}
-            {#if platform.isMobile && folderEntries.length === 1 && folderEntries[0][0] === 'Default'}
-              <div class="space-y-2.5">
+            {#if folderEntries.length === 1 && folderEntries[0][0] === 'Default'}
+              <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-2.5 sm:gap-3">
                 {#each folderEntries[0][1] as host (host.id)}
                   <HostCard
                     {host}
@@ -1509,62 +1530,57 @@
                 {/each}
               </div>
             {:else}
-              <div class="space-y-4 sm:space-y-6">
+              <div class="space-y-5">
                 {#each folderEntries as [folderName, folderHosts] (folderName)}
-                <div class="rounded-2xl border border-[#20202e] bg-[#111118] p-4 space-y-4">
-                  <!-- Folder Header -->
-                  <div class="flex items-center justify-between">
-                    <button
-                      type="button"
-                      onclick={() => toggleFolder(folderName)}
-                      class="flex items-center gap-2.5 text-left text-neutral-200 hover:text-white transition"
-                    >
-                      {#if collapsedFolders[folderName]}
-                        <ChevronRight class="h-4 w-4 text-neutral-400" />
-                      {:else}
-                        <ChevronDown class="h-4 w-4 text-emerald-400" />
-                      {/if}
-                      <div class="flex items-center gap-2">
-                        <Folder class="h-4 w-4 text-indigo-400" />
-                        <span class="text-sm font-bold text-white">{folderName}</span>
-                        <span class="rounded bg-[#1c1c28] border border-[#28283a] px-2 py-0.5 text-[10px] font-mono text-neutral-400">
-                          {folderHosts.length} hosts
-                        </span>
-                      </div>
-                    </button>
+                  <section class="space-y-2.5">
+                    <!-- Clean Borderless Section Header -->
+                    <div class="flex items-center justify-between border-b border-white/[0.06] pb-2">
+                      <button
+                        type="button"
+                        onclick={() => toggleFolder(folderName)}
+                        class="flex items-center gap-2 text-left text-zinc-200 hover:text-white transition cursor-pointer"
+                      >
+                        {#if collapsedFolders[folderName]}
+                          <ChevronRight class="h-3.5 w-3.5 text-zinc-500" />
+                        {:else}
+                          <ChevronDown class="h-3.5 w-3.5 text-emerald-400" />
+                        {/if}
+                        <Folder class="h-3.5 w-3.5 text-zinc-400" />
+                        <span class="text-xs font-semibold tracking-wide text-zinc-100">{folderName}</span>
+                        <span class="text-[11px] font-mono text-zinc-500">{folderHosts.length}</span>
+                      </button>
 
-                    <button
-                      type="button"
-                      onclick={() => {
-                        editingHost = { group: folderName };
-                        isAddHostOpen = true;
-                      }}
-                      class="flex items-center gap-1 rounded bg-[#1c1c28] hover:bg-[#252538] px-2.5 py-1 text-[11px] text-neutral-300 hover:text-white transition"
-                      title="Add host to this folder"
-                    >
-                      <Plus class="h-3 w-3" />
-                      <span>Add to folder</span>
-                    </button>
-                  </div>
-
-                  <!-- Folder Host Grid (collapsible) -->
-                  {#if !collapsedFolders[folderName]}
-                    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 sm:gap-4 animate-in fade-in duration-100">
-                      {#each folderHosts as host (host.id)}
-                        <HostCard
-                          {host}
-                          onConnect={handleConnect}
-                          onEdit={handleEditHost}
-                          onDelete={handleDeleteHost}
-                          onMove={handleOpenMoveModal}
-                          onOpenSftp={handleOpenSftp}
-                        />
-                      {/each}
+                      <button
+                        type="button"
+                        onclick={() => {
+                          editingHost = { group: folderName };
+                          isAddHostOpen = true;
+                        }}
+                        class="flex items-center gap-1 rounded-md px-2 py-1 text-[11px] text-zinc-400 hover:text-white hover:bg-white/[0.05] transition cursor-pointer"
+                        title="Add host to this folder"
+                      >
+                        <Plus class="h-3 w-3" />
+                        <span class="hidden sm:inline">Add</span>
+                      </button>
                     </div>
-                  {/if}
-                </div>
-              {/each}
-            </div>
+
+                    {#if !collapsedFolders[folderName]}
+                      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-2.5 sm:gap-3 animate-in fade-in duration-100">
+                        {#each folderHosts as host (host.id)}
+                          <HostCard
+                            {host}
+                            onConnect={handleConnect}
+                            onEdit={handleEditHost}
+                            onDelete={handleDeleteHost}
+                            onMove={handleOpenMoveModal}
+                            onOpenSftp={handleOpenSftp}
+                          />
+                        {/each}
+                      </div>
+                    {/if}
+                  </section>
+                {/each}
+              </div>
             {/if}
           {/if}
         </div>
@@ -1668,7 +1684,7 @@
           { id: 'keychain', label: 'Keychain', desc: 'SSH keys & certificates', icon: Key },
           { id: 'identities', label: 'Identities', desc: 'Saved usernames & profiles', icon: UserCheck },
           { id: 'snippets', label: 'Snippets', desc: 'Reusable shell commands', icon: FileCode2 },
-          { id: 'vaults', label: 'Vaults (E2EE)', desc: 'Encrypted personal & team vaults', icon: FolderLock },
+          { id: 'vaults', label: 'Vaults', desc: 'Personal & team vaults', icon: FolderLock },
           { id: 'logs', label: 'Session Logs', desc: 'Terminal history & audit trail', icon: ScrollText },
           { id: 'settings', label: 'Settings', desc: 'Gateway URL & workspace mode', icon: Settings }
         ]}
@@ -1724,7 +1740,7 @@
               <div>
                 <p class="font-semibold text-white">Current Mode</p>
                 <p class="text-[11px] text-neutral-400 mt-0.5">
-                  {api.isStandalone() ? 'Running in Standalone Mode (100% offline, local WebCrypto storage)' : 'Connected to Self-Hosted Gateway'}
+                  {api.isStandalone() ? 'Offline local storage' : 'Connected to Gateway'}
                 </p>
               </div>
               {#if api.isStandalone()}
@@ -1758,6 +1774,24 @@
                 onchange={() => api.setGateway(gatewayApiUrl)}
                 class="w-full rounded-lg border border-[#252535] bg-[#0d0d12] px-3 py-2 font-mono text-neutral-200 outline-none focus:border-emerald-500"
               />
+            </div>
+
+            <!-- Import Hosts (moved from top bar) -->
+            <div class="flex items-center justify-between p-3 rounded-lg bg-[#0e0e14] border border-[#20202d]">
+              <div>
+                <p class="font-semibold text-white">Import Hosts</p>
+                <p class="text-[11px] text-neutral-400 mt-0.5">
+                  Import hosts from OpenSSH config (~/.ssh/config), CSV, or JSON.
+                </p>
+              </div>
+              <button
+                type="button"
+                onclick={() => (isImportOpen = true)}
+                class="flex items-center gap-1.5 rounded-lg border border-[#282838] bg-[#161620] px-3 py-1.5 text-xs font-medium text-neutral-200 hover:text-white hover:border-[#38384d] transition cursor-pointer shrink-0"
+              >
+                <Download class="h-3.5 w-3.5 text-emerald-400" />
+                <span>Import Hosts</span>
+              </button>
             </div>
             <div class="pt-2 border-t border-[#20202c] flex items-center justify-between gap-2">
               <div class="flex items-center gap-2.5">
@@ -2014,6 +2048,117 @@
   {/if}
 
   <!-- Modals -->
+  {#if isQuickConnectOpen}
+    <div
+      class="fixed inset-0 z-50 flex items-start justify-center bg-black/70 backdrop-blur-xs p-4 pt-12 sm:pt-20"
+      onclick={() => (isQuickConnectOpen = false)}
+      role="presentation"
+    >
+      <div
+        class="w-full max-w-md rounded-2xl border border-[#28283a] bg-[#13131c] shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-100"
+        onclick={(e) => e.stopPropagation()}
+        onkeydown={(e) => { if (e.key === 'Escape') isQuickConnectOpen = false; }}
+        role="dialog"
+        aria-modal="true"
+        tabindex="-1"
+        aria-label="Quick Connect New Tab"
+      >
+        <div class="flex items-center gap-2.5 border-b border-[#222232] px-3.5 py-3">
+          <Search class="h-4 w-4 text-emerald-400 shrink-0" />
+          <input
+            bind:this={quickConnectInput}
+            type="text"
+            bind:value={quickConnectQuery}
+            autocapitalize="none"
+            autocorrect="off"
+            spellcheck={false}
+            placeholder="Choose a remote host to connect..."
+            onkeydown={(e) => {
+              if (e.key === 'Enter' && quickConnectHosts.length > 0) {
+                e.preventDefault();
+                const target = quickConnectHosts[0];
+                isQuickConnectOpen = false;
+                handleConnect(target);
+              }
+            }}
+            class="flex-1 bg-transparent text-sm sm:text-xs text-white placeholder-neutral-500 outline-none"
+          />
+          <span class="hidden sm:inline rounded border border-[#282838] bg-[#1a1a26] px-1.5 py-0.5 text-[10px] font-mono text-neutral-400">
+            {platform.isMac ? '⌘T' : 'Ctrl+T'}
+          </span>
+          <button
+            type="button"
+            onclick={() => (isQuickConnectOpen = false)}
+            class="rounded-lg p-1 text-neutral-400 hover:text-white"
+            aria-label="Close"
+          >
+            <X class="h-4 w-4" />
+          </button>
+        </div>
+
+        <div class="max-h-72 overflow-y-auto p-2 space-y-1">
+          {#if quickConnectHosts.length === 0}
+            <div class="px-3 py-6 text-center text-xs text-neutral-500">
+              {hosts.length === 0 ? 'No remote hosts saved yet.' : 'No matching remote hosts.'}
+            </div>
+          {:else}
+            {#each quickConnectHosts as host (host.id)}
+              <button
+                type="button"
+                onclick={() => {
+                  isQuickConnectOpen = false;
+                  handleConnect(host);
+                }}
+                class="flex w-full items-center justify-between gap-3 rounded-xl px-3 py-2.5 text-left hover:bg-[#1c1c2a] active:bg-[#222234] transition cursor-pointer group"
+              >
+                <div class="flex items-center gap-3 min-w-0">
+                  <div class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                    <Server class="h-4 w-4" />
+                  </div>
+                  <div class="min-w-0">
+                    <div class="text-xs font-semibold text-white truncate">{host.label}</div>
+                    <div class="text-[11px] font-mono text-neutral-400 truncate">
+                      {host.username}@{host.address}:{host.port || 22}
+                    </div>
+                  </div>
+                </div>
+                <span class="rounded-md bg-[#1a1a26] px-2 py-0.5 text-[10px] text-neutral-400 group-hover:text-emerald-300 shrink-0">
+                  Connect
+                </span>
+              </button>
+            {/each}
+          {/if}
+        </div>
+
+        <div class="border-t border-[#222232] bg-[#101018] p-2 flex items-center justify-between gap-2">
+          <button
+            type="button"
+            onclick={() => {
+              isQuickConnectOpen = false;
+              handleNewLocalTab();
+            }}
+            class="flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-medium text-neutral-300 hover:bg-[#1a1a26] hover:text-white transition cursor-pointer"
+          >
+            <Terminal class="h-3.5 w-3.5 text-cyan-400" />
+            <span>Local Shell</span>
+          </button>
+          <button
+            type="button"
+            onclick={() => {
+              isQuickConnectOpen = false;
+              editingHost = null;
+              isAddHostOpen = true;
+            }}
+            class="flex items-center gap-1.5 rounded-xl px-3 py-2 text-xs font-medium text-emerald-400 hover:bg-emerald-500/10 transition cursor-pointer"
+          >
+            <Plus class="h-3.5 w-3.5" />
+            <span>New Host</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  {/if}
+
   <AddHostDialog
     isOpen={isAddHostOpen}
     initialHost={editingHost}

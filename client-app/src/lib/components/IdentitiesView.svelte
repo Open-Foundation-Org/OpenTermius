@@ -274,15 +274,7 @@
   <!-- Header -->
   <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-[#22222a] pb-4">
     <div class="min-w-0">
-      <div class="flex items-center gap-2 flex-wrap">
-        <h2 class="text-base font-bold text-white tracking-tight">Identities</h2>
-        <span class="rounded bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 text-[10px] font-semibold text-emerald-400">
-          E2EE Profiles
-        </span>
-      </div>
-      <p class="text-xs text-neutral-400 mt-1">
-        Reusable credential profiles combining usernames and keys or passwords.
-      </p>
+      <h2 class="text-base font-bold text-white tracking-tight">Identities</h2>
     </div>
 
     <div class="flex items-center gap-2 shrink-0">
@@ -308,7 +300,7 @@
   {#if state === 'loading'}
     <div class="flex h-48 items-center justify-center text-xs text-neutral-400 gap-2">
       <RefreshCw class="h-4 w-4 animate-spin text-emerald-400" />
-      <span>Loading identities from encrypted vault...</span>
+      <span>Loading identities...</span>
     </div>
   {:else if state === 'error'}
     <div class="rounded-xl border border-rose-500/30 bg-rose-950/20 p-5 flex items-center justify-between">
@@ -346,63 +338,41 @@
     </div>
   {:else}
     <!-- Identities Grid -->
-    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-2.5 sm:gap-3">
       {#each identities as identity (identity.id)}
-        <div class="rounded-xl border border-[#22222a] bg-[#14141a] p-5 flex flex-col justify-between hover:border-emerald-500/40 transition">
-          <div>
-            <div class="flex items-start justify-between">
-              <div class="flex items-center gap-3">
-                <div class="flex h-10 w-10 items-center justify-center rounded-lg bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
-                  <UserCheck class="h-5 w-5" />
-                </div>
-                <div>
-                  <h3 class="text-sm font-semibold text-white">{identity.label}</h3>
-                  <p class="text-xs text-neutral-400 font-mono">user: <span class="text-neutral-200">{identity.username}</span></p>
-                </div>
-              </div>
-
-              <div class="flex items-center gap-1 shrink-0">
-                <button
-                  type="button"
-                  onclick={() => openEditModal(identity)}
-                  class="rounded-lg p-1.5 text-neutral-500 hover:text-emerald-400 hover:bg-[#20202d] transition cursor-pointer"
-                  title="Edit Identity"
-                  aria-label="Edit Identity"
-                >
-                  <Pencil class="h-3.5 w-3.5" />
-                </button>
-                <button
-                  type="button"
-                  onclick={() => handleDeleteIdentity(identity.id)}
-                  class="rounded-lg p-1.5 text-neutral-500 hover:text-rose-400 hover:bg-[#20202d] transition cursor-pointer"
-                  title="Delete Identity"
-                  aria-label="Delete Identity"
-                >
-                  <Trash2 class="h-3.5 w-3.5" />
-                </button>
-              </div>
-            </div>
-
-            <!-- Auth Details -->
-            <div class="mt-4 rounded-lg bg-[#0e0e14] border border-[#20202e] p-2.5 space-y-1 text-xs">
-              <div class="flex justify-between items-center">
-                <span class="text-neutral-400">Auth Method</span>
-                <span class="rounded bg-[#1a1a26] px-2 py-0.5 text-[10px] font-semibold text-neutral-300 uppercase">
-                  {identity.authType === 'key' ? 'SSH Key' : 'Password'}
-                </span>
-              </div>
-              {#if identity.authType === 'key'}
-                <div class="flex justify-between items-center pt-1 border-t border-[#1e1e28]">
-                  <span class="text-neutral-400">Attached Key</span>
-                  <span class="font-mono text-[10px] text-emerald-400">{identity.keyLabel || 'Linked Key'}</span>
-                </div>
-              {/if}
-            </div>
+        <div class="group flex items-center gap-3 rounded-xl border border-white/[0.06] bg-[#121217] px-3.5 py-3 hover:border-emerald-500/30 hover:bg-[#16161d] transition">
+          <div class="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
+            <UserCheck class="h-4 w-4" />
           </div>
 
-          <div class="mt-4 pt-3 border-t border-[#1e1e28] flex items-center justify-between text-[10px] text-neutral-500">
-            <span>Created</span>
-            <span>{new Date(identity.createdAt).toLocaleDateString()}</span>
+          <div class="min-w-0 flex-1">
+            <h3 class="truncate text-sm font-medium text-neutral-100 leading-tight">
+              {identity.label}
+            </h3>
+            <p class="mt-0.5 truncate font-mono text-[11px] text-neutral-500">
+              {identity.username} · {identity.authType === 'key' ? (identity.keyLabel || 'SSH Key') : 'Password'}
+            </p>
+          </div>
+
+          <div class="flex items-center gap-0.5 shrink-0">
+            <button
+              type="button"
+              onclick={() => openEditModal(identity)}
+              class="rounded-lg p-1.5 text-neutral-500 hover:text-emerald-400 hover:bg-white/[0.06] transition cursor-pointer"
+              title="Edit Identity"
+              aria-label="Edit Identity"
+            >
+              <Pencil class="h-3.5 w-3.5" />
+            </button>
+            <button
+              type="button"
+              onclick={() => handleDeleteIdentity(identity.id)}
+              class="rounded-lg p-1.5 text-neutral-500 hover:text-rose-400 hover:bg-white/[0.06] transition cursor-pointer"
+              title="Delete Identity"
+              aria-label="Delete Identity"
+            >
+              <Trash2 class="h-3.5 w-3.5" />
+            </button>
           </div>
         </div>
       {/each}

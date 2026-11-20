@@ -117,15 +117,7 @@
   <!-- Header -->
   <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-[#22222a] pb-4">
     <div class="min-w-0">
-      <div class="flex items-center gap-2 flex-wrap">
-        <h2 class="text-base font-bold text-white tracking-tight">Vaults & Teams</h2>
-        <span class="rounded bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 text-[10px] font-semibold text-emerald-400">
-          E2EE
-        </span>
-      </div>
-      <p class="text-xs text-neutral-400 mt-1">
-        Separate personal credentials or share hosts and keys across team vaults.
-      </p>
+      <h2 class="text-base font-bold text-white tracking-tight">Vaults & Teams</h2>
     </div>
 
     <div class="flex items-center gap-2 shrink-0">
@@ -238,20 +230,12 @@
               {/if}
             </div>
 
-            <div class="mt-4 pt-3 border-t border-[#1e1e28] space-y-2 text-xs text-neutral-400">
+            <div class="mt-4 pt-3 border-t border-[#1e1e28] text-xs text-neutral-400">
               <div class="flex justify-between">
-                <span>Vault ID</span>
-                <span class="font-mono text-[10px] text-neutral-300">{vault.id.slice(0, 8)}...</span>
-              </div>
-              <div class="flex justify-between">
-                <span>Access Scope</span>
-                <span class="font-mono text-[10px] {vault.type === 'team' ? 'text-indigo-400' : 'text-emerald-400'}">
-                  {vault.type === 'team' ? 'Shared Team Members' : 'Private (Owner Only)'}
+                <span>Access</span>
+                <span class="font-mono text-[11px] {vault.type === 'team' ? 'text-indigo-400' : 'text-emerald-400'}">
+                  {vault.type === 'team' ? 'Shared Team' : 'Private'}
                 </span>
-              </div>
-              <div class="flex justify-between">
-                <span>Encryption</span>
-                <span class="font-mono text-[10px] text-emerald-400">AES-256-GCM (Client-Side)</span>
               </div>
             </div>
           </div>
