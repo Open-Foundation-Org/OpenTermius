@@ -76,9 +76,8 @@
   ): Promise<void> {
     if (targetId === 'local') {
       const { invoke } = await import('@tauri-apps/api/core');
-      const base = destDir.endsWith('/') ? destDir.slice(0, -1) : destDir;
       await invoke('local_fs_write_bytes', {
-        path: `${base}/${filename}`,
+        path: joinPath(destDir, filename),
         data: Array.from(bytes)
       });
       return;
@@ -125,6 +124,10 @@
   }
 
   function joinPath(base: string, name: string): string {
+    if (/^[A-Za-z]:\\/.test(base)) {
+      const clean = base.replace(/\\+$/, '');
+      return `${clean}\\${name}`;
+    }
     const clean = base.endsWith('/') && base.length > 1 ? base.slice(0, -1) : base;
     return clean === '/' ? `/${name}` : `${clean}/${name}`;
   }

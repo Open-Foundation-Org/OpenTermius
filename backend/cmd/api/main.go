@@ -22,6 +22,9 @@ func main() {
 	port := getEnv("SERVER_PORT", "8080")
 	dbURL := getEnv("DATABASE_URL", "postgres://postgres:postgres@localhost:5432/opentermius?sslmode=disable")
 	jwtSecret := getEnv("JWT_SECRET", "super-secret-opentermius-key-32-chars-long!")
+	if jwtSecret == "super-secret-opentermius-key-32-chars-long!" {
+		log.Println("SECURITY WARNING: JWT_SECRET is using the default fallback value. Set a strong random JWT_SECRET in .env!")
+	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()

@@ -1,6 +1,6 @@
 // OpenTermius Client-Side WebCrypto E2EE Adapter (AES-256-GCM + PBKDF2)
 
-const KEY_CACHE = new Map<string, CryptoKey>();
+const KEY_PROMISE_CACHE = new Map<string, Promise<CryptoKey>>();
 const FALLBACK_SECRET_KEY = 'opentermius-e2ee-default-vault-secret';
 const APP_SALT = new TextEncoder().encode('OpenTermius-E2EE-Salt-v1');
 
@@ -31,11 +31,15 @@ export async function deriveKeyFromPassword(password: string, salt: Uint8Array):
 async function getCachedVaultKey(vaultSecret?: string): Promise<CryptoKey | null> {
   if (typeof window === 'undefined' || !window.crypto?.subtle) return null;
   const secret = vaultSecret?.trim() || FALLBACK_SECRET_KEY;
-  const cached = KEY_CACHE.get(secret);
-  if (cached) return cached;
-  const key = await deriveKeyFromPassword(secret, APP_SALT);
-  KEY_CACHE.set(secret, key);
-  return key;
+  let promise = KEY_PROMISE_CACHE.get(secret);
+  if (!promise) {
+    promise = deriveKeyFromPassword(secret, APP_SALT).catch((err) => {
+      KEY_PROMISE_CACHE.delete(secret);
+      throw err;
+    });
+    KEY_PROMISE_CACHE.set(secret, promise);
+  }
+  return promise;
 }
 
 export async function encryptVaultItem(

@@ -3,8 +3,12 @@ package http
 import (
 	"context"
 	"encoding/json"
+	"net"
 	"net/http"
+	"os"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/opentermius/opentermius/internal/ports"
@@ -14,12 +18,71 @@ type contextKey string
 
 const userIDKey contextKey = "user_id"
 
+type ipRateLimiter struct {
+	mu      sync.Mutex
+	hits    map[string][]time.Time
+	limit   int
+	window  time.Duration
+	lastGC  time.Time
+}
+
+func newIPRateLimiter(limit int, window time.Duration) *ipRateLimiter {
+	return &ipRateLimiter{
+		hits:   make(map[string][]time.Time),
+		limit:  limit,
+		window: window,
+		lastGC: time.Now(),
+	}
+}
+
+func (l *ipRateLimiter) allow(ip string) bool {
+	now := time.Now()
+	cutoff := now.Add(-l.window)
+
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	if now.Sub(l.lastGC) > l.window {
+		for k, times := range l.hits {
+			var kept []time.Time
+			for _, t := range times {
+				if t.After(cutoff) {
+					kept = append(kept, t)
+				}
+			}
+			if len(kept) == 0 {
+				delete(l.hits, k)
+			} else {
+				l.hits[k] = kept
+			}
+		}
+		l.lastGC = now
+	}
+
+	var recent []time.Time
+	for _, t := range l.hits[ip] {
+		if t.After(cutoff) {
+			recent = append(recent, t)
+		}
+	}
+	if len(recent) >= l.limit {
+		l.hits[ip] = recent
+		return false
+	}
+	l.hits[ip] = append(recent, now)
+	return true
+}
+
 type Router struct {
-	mux           *http.ServeMux
-	authService   ports.AuthService
-	authHandler   *AuthHandler
-	vaultHandler  *VaultHandler
-	collabHandler *CollabHandler
+	mux                 *http.ServeMux
+	authService         ports.AuthService
+	authHandler         *AuthHandler
+	vaultHandler        *VaultHandler
+	collabHandler       *CollabHandler
+	authLimiter         *ipRateLimiter
+	adminEmail          string
+	allowPublicRegister bool
+	allowedOrigins      map[string]bool
 }
 
 func NewRouter(
@@ -28,28 +91,57 @@ func NewRouter(
 	vaultHandler *VaultHandler,
 	collabHandler *CollabHandler,
 ) *Router {
+	adminEmail := strings.ToLower(strings.TrimSpace(os.Getenv("DEFAULT_ADMIN_EMAIL")))
+	if adminEmail == "" {
+		adminEmail = "admin@opentermius.local"
+	}
+	allowPublic := strings.EqualFold(strings.TrimSpace(os.Getenv("ALLOW_PUBLIC_REGISTER")), "true")
+
+	allowedOrigins := make(map[string]bool)
+	if raw := strings.TrimSpace(os.Getenv("CORS_ALLOWED_ORIGINS")); raw != "" {
+		for _, o := range strings.Split(raw, ",") {
+			if trimmed := strings.TrimSpace(o); trimmed != "" {
+				allowedOrigins[trimmed] = true
+			}
+		}
+		// Always allow Tauri native desktop & Android WebView origins
+		allowedOrigins["tauri://localhost"] = true
+		allowedOrigins["http://tauri.localhost"] = true
+		allowedOrigins["https://tauri.localhost"] = true
+	}
+
 	r := &Router{
-		mux:           http.NewServeMux(),
-		authService:   authService,
-		authHandler:   authHandler,
-		vaultHandler:  vaultHandler,
-		collabHandler: collabHandler,
+		mux:                 http.NewServeMux(),
+		authService:         authService,
+		authHandler:         authHandler,
+		vaultHandler:        vaultHandler,
+		collabHandler:       collabHandler,
+		authLimiter:         newIPRateLimiter(20, time.Minute),
+		adminEmail:          adminEmail,
+		allowPublicRegister: allowPublic,
+		allowedOrigins:      allowedOrigins,
 	}
 	r.registerRoutes()
 	return r
 }
 
 func (r *Router) registerRoutes() {
-	// Public Auth Endpoints
-	r.mux.HandleFunc("POST /api/v1/auth/register", r.authHandler.Register)
-	r.mux.HandleFunc("POST /api/v1/auth/login", r.authHandler.Login)
-	r.mux.HandleFunc("POST /api/v1/auth/refresh", r.authHandler.Refresh)
+	// Public Auth Endpoints (rate-limited)
+	r.mux.Handle("POST /api/v1/auth/register", r.rateLimitAuth(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		if !r.allowPublicRegister {
+			writeJSONError(w, http.StatusForbidden, "public registration is disabled; contact your Gateway admin")
+			return
+		}
+		r.authHandler.Register(w, req)
+	})))
+	r.mux.Handle("POST /api/v1/auth/login", r.rateLimitAuth(http.HandlerFunc(r.authHandler.Login)))
+	r.mux.Handle("POST /api/v1/auth/refresh", r.rateLimitAuth(http.HandlerFunc(r.authHandler.Refresh)))
 
-	// Protected Profile & User Management (Gateway Admin Console)
+	// Protected Profile & Admin-Only User Management (Gateway Admin Console)
 	r.mux.Handle("GET /api/v1/auth/me", r.authMiddleware(http.HandlerFunc(r.authHandler.Me)))
-	r.mux.Handle("GET /api/v1/users", r.authMiddleware(http.HandlerFunc(r.authHandler.ListUsers)))
-	r.mux.Handle("POST /api/v1/users", r.authMiddleware(http.HandlerFunc(r.authHandler.CreateUser)))
-	r.mux.Handle("DELETE /api/v1/users/{id}", r.authMiddleware(http.HandlerFunc(r.authHandler.DeleteUser)))
+	r.mux.Handle("GET /api/v1/users", r.adminMiddleware(http.HandlerFunc(r.authHandler.ListUsers)))
+	r.mux.Handle("POST /api/v1/users", r.adminMiddleware(http.HandlerFunc(r.authHandler.CreateUser)))
+	r.mux.Handle("DELETE /api/v1/users/{id}", r.adminMiddleware(http.HandlerFunc(r.authHandler.DeleteUser)))
 
 	// Protected Vaults
 	r.mux.Handle("GET /api/v1/vaults", r.authMiddleware(http.HandlerFunc(r.vaultHandler.ListVaults)))
@@ -77,8 +169,14 @@ func (r *Router) registerRoutes() {
 }
 
 func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
-	// Global CORS Handler
-	w.Header().Set("Access-Control-Allow-Origin", "*")
+	// Global CORS Handler (respects CORS_ALLOWED_ORIGINS when configured)
+	origin := req.Header.Get("Origin")
+	if len(r.allowedOrigins) == 0 {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+	} else if origin != "" && r.allowedOrigins[origin] {
+		w.Header().Set("Access-Control-Allow-Origin", origin)
+		w.Header().Set("Vary", "Origin")
+	}
 	w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 	w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
 
@@ -90,6 +188,27 @@ func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	r.mux.ServeHTTP(w, req)
 }
 
+func clientIP(req *http.Request) string {
+	if xff := req.Header.Get("X-Forwarded-For"); xff != "" {
+		return strings.TrimSpace(strings.Split(xff, ",")[0])
+	}
+	host, _, err := net.SplitHostPort(req.RemoteAddr)
+	if err != nil {
+		return req.RemoteAddr
+	}
+	return host
+}
+
+func (r *Router) rateLimitAuth(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		if !r.authLimiter.allow(clientIP(req)) {
+			writeJSONError(w, http.StatusTooManyRequests, "too many authentication attempts; try again in a minute")
+			return
+		}
+		next.ServeHTTP(w, req)
+	})
+}
+
 func (r *Router) authMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		authHeader := req.Header.Get("Authorization")
@@ -99,12 +218,6 @@ func (r *Router) authMiddleware(next http.Handler) http.Handler {
 		}
 
 		tokenString := strings.TrimPrefix(authHeader, "Bearer ")
-		if tokenString == "standalone" {
-			ctx := context.WithValue(req.Context(), userIDKey, "standalone-local-user")
-			next.ServeHTTP(w, req.WithContext(ctx))
-			return
-		}
-
 		userID, err := r.authService.ValidateToken(req.Context(), tokenString)
 		if err != nil {
 			writeJSONError(w, http.StatusUnauthorized, "invalid or expired token")
@@ -114,6 +227,22 @@ func (r *Router) authMiddleware(next http.Handler) http.Handler {
 		ctx := context.WithValue(req.Context(), userIDKey, userID.String())
 		next.ServeHTTP(w, req.WithContext(ctx))
 	})
+}
+
+func (r *Router) adminMiddleware(next http.Handler) http.Handler {
+	return r.authMiddleware(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		uid := getUserID(req)
+		if uid == uuid.Nil {
+			writeJSONError(w, http.StatusUnauthorized, "unauthorized")
+			return
+		}
+		user, err := r.authService.GetProfile(req.Context(), uid)
+		if err != nil || user == nil || !strings.EqualFold(strings.TrimSpace(user.Email), r.adminEmail) {
+			writeJSONError(w, http.StatusForbidden, "gateway admin privileges required")
+			return
+		}
+		next.ServeHTTP(w, req)
+	}))
 }
 
 func getUserID(r *http.Request) uuid.UUID {

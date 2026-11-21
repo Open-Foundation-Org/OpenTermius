@@ -196,7 +196,6 @@
         vaults = await api.getVaults();
         activeVault = vaults[0];
         await loadHosts();
-        loadState = 'success';
         return;
       }
 
@@ -248,10 +247,18 @@
     }
   }
 
-  async function loadHosts() {
+  let lastHostsFingerprint = '';
+
+  async function loadHosts(silent = false) {
     if (!activeVault) return;
     try {
       const items = await api.getVaultItems(activeVault.id, 'host');
+      const fingerprint = `${activeVault.id}|${items.map((i) => `${i.id}:${i.version}:${i.updated_at}:${i.label}`).join(',')}`;
+      if (silent && fingerprint === lastHostsFingerprint && (hosts.length > 0 || items.length === 0)) {
+        return;
+      }
+      lastHostsFingerprint = fingerprint;
+
       if (items.length === 0) {
         hosts = [];
         loadState = 'empty';
@@ -285,6 +292,7 @@
 
       loadState = 'success';
     } catch (err: unknown) {
+      if (silent && hosts.length > 0) return;
       loadState = 'error';
       errorMessage = formatErrorMessage(err, 'Failed to fetch hosts from database');
     }
@@ -538,6 +546,9 @@
       teamPresence = [];
       return;
     }
+    if (typeof document !== 'undefined' && document.hidden && terminalStore.tabCount === 0) {
+      return;
+    }
     const activeSessions = terminalStore.tabs
       .filter((t) => !t.remoteConfig)
       .map((t) => ({
@@ -689,8 +700,10 @@
 
   async function silentBackgroundSync() {
     if (!isAuthenticated || api.isStandalone() || isAddHostOpen || isMoveModalOpen) return;
+    if (typeof document !== 'undefined' && document.hidden) return;
     try {
       let latestVaults = await api.getVaults();
+      gatewayOnline = api.isGatewayOnline();
       if (gatewayOnline && !latestVaults.some((v) => v.type === 'personal')) {
         const personal = await api.createVault(
           'Personal Cloud Vault',
@@ -705,7 +718,8 @@
           activeVault = latestVaults[0];
         }
       }
-      await loadHosts();
+      await loadHosts(true);
+      gatewayOnline = api.isGatewayOnline();
     } catch {
       // Ignore background polling errors silently
     }
@@ -720,7 +734,7 @@
     (window as any).AndroidClipboard?.setKeepAliveSessions?.(count);
   });
 
-  const APP_VERSION = '0.5.1';
+  const APP_VERSION = '0.5.2';
   type DesktopUpdate = Awaited<ReturnType<typeof import('@tauri-apps/plugin-updater').check>>;
   let availableUpdate = $state<DesktopUpdate | null>(null);
   let releaseFallback = $state<{ version: string; url: string } | null>(null);
@@ -739,10 +753,10 @@
   }
 
   async function checkDesktopUpdates(manual = false) {
-    if (isCheckingUpdate) return;
+    if (platform.isAndroid || isCheckingUpdate) return;
     isCheckingUpdate = true;
     try {
-      if (!platform.isAndroid && (window as any).__TAURI_INTERNALS__) {
+      if ((window as any).__TAURI_INTERNALS__) {
         try {
           const { check } = await import('@tauri-apps/plugin-updater');
           const update = await check();
@@ -764,9 +778,7 @@
         if (remoteVer && isNewerSemver(remoteVer, APP_VERSION)) {
           const assets: Array<{ name: string; browser_download_url: string }> = Array.isArray(data.assets) ? data.assets : [];
           let targetAsset = data.html_url || 'https://github.com/wisnu-w/OpenTermius/releases/latest';
-          if (platform.isAndroid) {
-            targetAsset = assets.find((a) => a.name.endsWith('.apk'))?.browser_download_url || targetAsset;
-          } else if (platform.isMac) {
+          if (platform.isMac) {
             targetAsset = assets.find((a) => a.name.endsWith('.dmg'))?.browser_download_url || targetAsset;
           } else {
             targetAsset = assets.find((a) => a.name.endsWith('.exe'))?.browser_download_url || targetAsset;
@@ -805,13 +817,15 @@
 
   onMount(() => {
     checkAuthAndLoadData();
-    void checkDesktopUpdates();
+    if (!platform.isAndroid) {
+      void checkDesktopUpdates();
+    }
     const unsubSync = api.onSyncComplete((count) => {
       toast.success(`Synced ${count} offline change(s) to Gateway.`);
       void loadHosts();
     });
-    const syncTimer = setInterval(silentBackgroundSync, 15000);
-    const heartbeatTimer = setInterval(runPresenceHeartbeat, 8000);
+    const syncTimer = setInterval(silentBackgroundSync, 30000);
+    const heartbeatTimer = setInterval(runPresenceHeartbeat, 10000);
     const onFocus = () => {
       void silentBackgroundSync();
       void runPresenceHeartbeat();
@@ -884,7 +898,7 @@
 
   <!-- Main Viewport Area -->
   <main class="flex flex-1 flex-col min-w-0 min-h-0 overflow-hidden">
-    {#if (availableUpdate || releaseFallback) && !updateDismissed}
+    {#if !platform.isAndroid && (availableUpdate || releaseFallback) && !updateDismissed}
       {@const targetVersion = availableUpdate?.version || releaseFallback?.version}
       <div class="flex items-center justify-between gap-3 border-b border-emerald-500/30 bg-emerald-500/10 px-4 py-2 text-xs text-emerald-100 shrink-0">
         <div class="flex items-center gap-2 min-w-0">
@@ -1802,15 +1816,17 @@
             <div class="pt-2 border-t border-[#20202c] flex items-center justify-between gap-2">
               <div class="flex items-center gap-2.5">
                 <span class="text-neutral-400 font-mono text-[11px]">OpenTermius v{APP_VERSION}</span>
-                <button
-                  type="button"
-                  disabled={isCheckingUpdate}
-                  onclick={() => checkDesktopUpdates(true)}
-                  class="inline-flex items-center gap-1 rounded-md border border-[#282838] bg-[#161620] px-2 py-1 text-[11px] font-medium text-emerald-400 hover:bg-[#1e1e2c] disabled:opacity-50 transition"
-                >
-                  <RefreshCw class="h-3 w-3 {isCheckingUpdate ? 'animate-spin' : ''}" />
-                  <span>{isCheckingUpdate ? 'Checking...' : 'Check for Updates'}</span>
-                </button>
+                {#if !platform.isAndroid}
+                  <button
+                    type="button"
+                    disabled={isCheckingUpdate}
+                    onclick={() => checkDesktopUpdates(true)}
+                    class="inline-flex items-center gap-1 rounded-md border border-[#282838] bg-[#161620] px-2 py-1 text-[11px] font-medium text-emerald-400 hover:bg-[#1e1e2c] disabled:opacity-50 transition"
+                  >
+                    <RefreshCw class="h-3 w-3 {isCheckingUpdate ? 'animate-spin' : ''}" />
+                    <span>{isCheckingUpdate ? 'Checking...' : 'Check for Updates'}</span>
+                  </button>
+                {/if}
               </div>
               <button
                 type="button"

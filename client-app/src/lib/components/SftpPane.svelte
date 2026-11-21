@@ -179,6 +179,16 @@
 
   function handleNavigateUp() {
     if (!currentPath || currentPath === '/' || currentPath === '.') return;
+    if (isLocal && /^[A-Za-z]:\\/.test(currentPath)) {
+      const normalized = currentPath.replace(/\\+$/, '');
+      const idx = normalized.lastIndexOf('\\');
+      if (idx <= 2) {
+        loadDirectory(normalized.slice(0, 3));
+      } else {
+        loadDirectory(normalized.slice(0, idx));
+      }
+      return;
+    }
     const parts = currentPath.split('/').filter(Boolean);
     parts.pop();
     loadDirectory('/' + parts.join('/'));
@@ -192,7 +202,6 @@
   }
 
   function toggleSelect(item: ApiSftpFile) {
-    if (item.isDir) return;
     if (selectedPaths.includes(item.path)) {
       onSelectionChange(selectedPaths.filter((p) => p !== item.path));
     } else {
@@ -230,11 +239,18 @@
     }
   }
 
+  function joinChildPath(base: string, name: string): string {
+    if (isLocal && /^[A-Za-z]:\\/.test(base)) {
+      return `${base.replace(/\\+$/, '')}\\${name}`;
+    }
+    const clean = base.endsWith('/') && base.length > 1 ? base.slice(0, -1) : base;
+    return clean === '/' ? `/${name}` : `${clean}/${name}`;
+  }
+
   async function handleCreateFolder(e: SubmitEvent) {
     e.preventDefault();
     if (!newFolderName.trim()) return;
-    const base = currentPath.endsWith('/') ? currentPath.slice(0, -1) : currentPath;
-    const target = `${base}/${newFolderName.trim()}`;
+    const target = joinChildPath(currentPath, newFolderName.trim());
 
     try {
       if (isLocal) {
@@ -260,12 +276,11 @@
 
     isUploading = true;
     try {
-      const base = currentPath.endsWith('/') ? currentPath.slice(0, -1) : currentPath;
       for (const file of files) {
         if (isLocal) {
           const { invoke } = await import('@tauri-apps/api/core');
           const bytes = Array.from(new Uint8Array(await file.arrayBuffer()));
-          await invoke('local_fs_write_bytes', { path: `${base}/${file.name}`, data: bytes });
+          await invoke('local_fs_write_bytes', { path: joinChildPath(currentPath, file.name), data: bytes });
         } else {
           const config = getHostConfig();
           if (!config) return;
