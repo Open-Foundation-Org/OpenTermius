@@ -252,8 +252,11 @@
   async function loadHosts(silent = false) {
     if (!activeVault) return;
     try {
-      const items = await api.getVaultItems(activeVault.id, 'host');
-      const fingerprint = `${activeVault.id}|${items.map((i) => `${i.id}:${i.version}:${i.updated_at}:${i.label}`).join(',')}`;
+      const [items, identityItems] = await Promise.all([
+        api.getVaultItems(activeVault.id, 'host'),
+        api.getVaultItems(activeVault.id, 'identity').catch(() => [])
+      ]);
+      const fingerprint = `${activeVault.id}|${items.map((i) => `${i.id}:${i.version}:${i.updated_at}:${i.label}`).join(',')}|${identityItems.map((i) => `${i.id}:${i.version}:${i.updated_at}`).join(',')}`;
       if (silent && fingerprint === lastHostsFingerprint && (hosts.length > 0 || items.length === 0)) {
         return;
       }
@@ -265,6 +268,19 @@
         return;
       }
 
+      // Resolve linked identities live so updating an Identity updates all hosts referencing it
+      const identityMap = new Map<string, any>();
+      await Promise.all(
+        identityItems.map(async (idItem) => {
+          const parsedId = await decryptVaultPayload<any>(
+            idItem.ciphertext,
+            idItem.nonce,
+            activeVault?.encrypted_key
+          );
+          if (parsedId) identityMap.set(idItem.id, parsedId);
+        })
+      );
+
       hosts = await Promise.all(
         items.map(async (item) => {
           const parsed = await decryptVaultPayload<any>(
@@ -272,16 +288,28 @@
             item.nonce,
             activeVault?.encrypted_key
           );
+          const linkedId = parsed?.identityId ? identityMap.get(parsed.identityId) : null;
+          const resolvedAuthType = linkedId?.authType || parsed?.authType || 'password';
           return {
             id: item.id,
             label: item.label,
             address: parsed?.address || '127.0.0.1',
             port: parsed?.port || 22,
-            username: parsed?.username || 'root',
-            authType: parsed?.authType || 'password',
-            password: parsed?.password || '',
-            privateKey: parsed?.privateKey || '',
-            passphrase: parsed?.passphrase || '',
+            username: linkedId?.username || parsed?.username || 'root',
+            authType: resolvedAuthType,
+            identityId: parsed?.identityId || '',
+            password:
+              resolvedAuthType === 'password'
+                ? (linkedId ? linkedId.password || '' : parsed?.password || '')
+                : '',
+            privateKey:
+              resolvedAuthType === 'key'
+                ? (linkedId ? linkedId.privateKey || '' : parsed?.privateKey || '')
+                : '',
+            passphrase:
+              resolvedAuthType === 'key'
+                ? (linkedId ? linkedId.passphrase || '' : parsed?.passphrase || '')
+                : '',
             tags: parsed?.tags || [],
             group: parsed?.group || 'Default',
             useMosh: !!parsed?.useMosh,
@@ -348,6 +376,7 @@
         port: hostData.port,
         username: hostData.username,
         authType: hostData.authType,
+        identityId: hostData.identityId || '',
         password: hostData.password,
         privateKey: hostData.privateKey,
         passphrase: hostData.passphrase,
@@ -357,7 +386,7 @@
       };
 
       const { ciphertext, nonce } = await encryptVaultPayload(payload, activeVault.encrypted_key);
-      const isExistingHost = Boolean(editingHost || (hostData.id && hosts.some((h) => h.id === hostData.id)));
+      const isExistingHost = Boolean(editingHost?.id || (hostData.id && hosts.some((h) => h.id === hostData.id)));
 
       if (isExistingHost) {
         // Update existing host item
@@ -385,6 +414,7 @@
           ...hostData,
           id: created.id
         });
+        editingHost = null;
       }
       loadState = 'success';
     } catch (err: unknown) {
@@ -394,6 +424,15 @@
 
   function handleEditHost(host: any) {
     editingHost = host;
+    isAddHostOpen = true;
+  }
+
+  function handleDuplicateHost(host: any) {
+    editingHost = {
+      ...host,
+      id: '',
+      label: `${host.label} (Copy)`
+    };
     isAddHostOpen = true;
   }
 
@@ -734,7 +773,7 @@
     (window as any).AndroidClipboard?.setKeepAliveSessions?.(count);
   });
 
-  const APP_VERSION = '0.5.2';
+  const APP_VERSION = '0.5.3';
   type DesktopUpdate = Awaited<ReturnType<typeof import('@tauri-apps/plugin-updater').check>>;
   let availableUpdate = $state<DesktopUpdate | null>(null);
   let releaseFallback = $state<{ version: string; url: string } | null>(null);
@@ -1543,6 +1582,7 @@
                     {host}
                     onConnect={handleConnect}
                     onEdit={handleEditHost}
+                    onDuplicate={handleDuplicateHost}
                     onDelete={handleDeleteHost}
                     onMove={handleOpenMoveModal}
                     onOpenSftp={handleOpenSftp}
@@ -1591,6 +1631,7 @@
                             {host}
                             onConnect={handleConnect}
                             onEdit={handleEditHost}
+                            onDuplicate={handleDuplicateHost}
                             onDelete={handleDeleteHost}
                             onMove={handleOpenMoveModal}
                             onOpenSftp={handleOpenSftp}

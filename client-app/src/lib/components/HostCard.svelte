@@ -7,7 +7,8 @@
     FolderInput,
     Folder,
     MoreVertical,
-    Copy
+    Copy,
+    CopyPlus
   } from '@lucide/svelte';
   import { platform } from '../stores/platform.svelte';
   import { toast } from '../stores/toast.svelte';
@@ -32,12 +33,13 @@
     host: HostItem;
     onConnect: (host: HostItem) => void;
     onEdit?: (host: HostItem) => void;
+    onDuplicate?: (host: HostItem) => void;
     onDelete?: (host: HostItem) => void;
     onMove?: (host: HostItem) => void;
     onOpenSftp?: (host: HostItem) => void;
   }
 
-  let { host, onConnect, onEdit, onDelete, onMove, onOpenSftp }: Props = $props();
+  let { host, onConnect, onEdit, onDuplicate, onDelete, onMove, onOpenSftp }: Props = $props();
   let isMenuOpen = $state(false);
 
   async function copyHostTarget() {
@@ -149,6 +151,15 @@
                 class="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm text-zinc-200 active:bg-white/[0.06]"
               >
                 <Pencil class="h-4 w-4 text-zinc-400" /> Edit Host
+              </button>
+            {/if}
+            {#if onDuplicate}
+              <button
+                type="button"
+                onclick={() => { isMenuOpen = false; onDuplicate(host); }}
+                class="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm text-zinc-200 active:bg-white/[0.06]"
+              >
+                <CopyPlus class="h-4 w-4 text-zinc-400" /> Duplicate Host
               </button>
             {/if}
             {#if onMove}
@@ -281,6 +292,15 @@
             class="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-zinc-200 hover:bg-white/[0.06] transition cursor-pointer"
           >
             <Pencil class="h-3.5 w-3.5 text-zinc-400" /> Edit Host
+          </button>
+        {/if}
+        {#if onDuplicate}
+          <button
+            type="button"
+            onclick={() => { isMenuOpen = false; onDuplicate(host); }}
+            class="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-zinc-200 hover:bg-white/[0.06] transition cursor-pointer"
+          >
+            <CopyPlus class="h-3.5 w-3.5 text-zinc-400" /> Duplicate Host
           </button>
         {/if}
         {#if onMove}

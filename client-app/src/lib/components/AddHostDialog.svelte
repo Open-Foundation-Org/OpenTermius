@@ -123,7 +123,9 @@
         tags = Array.isArray(initialHost.tags)
           ? initialHost.tags.join(', ')
           : initialHost.tags || '';
-        credMode = 'manual';
+        selectedIdentityId = initialHost.identityId || '';
+        selectedKeyId = '';
+        credMode = initialHost.identityId ? 'identity' : 'manual';
         if (initialHost.proxy) {
           proxyMode = initialHost.proxy.mode || 'none';
           proxyJumpHostId = initialHost.proxy.jumpHostId || '';
@@ -153,6 +155,8 @@
         useMosh = false;
         group = 'Default';
         tags = '';
+        selectedIdentityId = '';
+        selectedKeyId = '';
         credMode = 'manual';
         proxyMode = 'none';
         proxyJumpHostId = '';
@@ -165,14 +169,21 @@
 
   function handleSubmit(e: SubmitEvent) {
     e.preventDefault();
+    // Always re-apply selected Identity or Keychain right before saving (prevents stale/empty credentials)
+    if (credMode === 'identity' && selectedIdentityId) {
+      handleSelectIdentity(selectedIdentityId);
+    } else if (credMode === 'keychain' && selectedKeyId) {
+      handleSelectKey(selectedKeyId);
+    }
     const cleanAddr = address.trim() || '127.0.0.1';
     onSave({
       id: initialHost?.id || crypto.randomUUID(),
       label: label.trim() || cleanAddr,
       address: cleanAddr,
       port: port || 22,
-      username: username || 'root',
+      username: username.trim() || 'root',
       authType,
+      identityId: credMode === 'identity' ? selectedIdentityId : '',
       password: authType === 'password' ? password : '',
       privateKey: authType === 'key' ? privateKey : '',
       passphrase: authType === 'key' ? passphrase : '',
@@ -291,7 +302,14 @@
               {#if vaultIdentities.length > 0}
                 <button
                   type="button"
-                  onclick={() => (credMode = 'identity')}
+                  onclick={() => {
+                    credMode = 'identity';
+                    if (!selectedIdentityId && vaultIdentities.length > 0) {
+                      handleSelectIdentity(vaultIdentities[0].id);
+                    } else if (selectedIdentityId) {
+                      handleSelectIdentity(selectedIdentityId);
+                    }
+                  }}
                   class="px-2.5 py-1 rounded-md text-[11px] font-medium transition {credMode === 'identity' ? 'bg-indigo-600 text-white' : 'text-neutral-400 hover:text-white'}"
                 >
                   Identity
@@ -300,7 +318,14 @@
               {#if vaultKeys.length > 0}
                 <button
                   type="button"
-                  onclick={() => (credMode = 'keychain')}
+                  onclick={() => {
+                    credMode = 'keychain';
+                    if (!selectedKeyId && vaultKeys.length > 0) {
+                      handleSelectKey(vaultKeys[0].id);
+                    } else if (selectedKeyId) {
+                      handleSelectKey(selectedKeyId);
+                    }
+                  }}
                   class="px-2.5 py-1 rounded-md text-[11px] font-medium transition {credMode === 'keychain' ? 'bg-emerald-600 text-white' : 'text-neutral-400 hover:text-white'}"
                 >
                   Keychain

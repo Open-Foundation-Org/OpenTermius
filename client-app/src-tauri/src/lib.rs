@@ -188,7 +188,29 @@ async fn establish_ssh_session(
             .map_err(|e| format!("Password authentication error: {}", e))?;
 
         if !auth_res.success() {
-            return Err("SSH password authentication rejected (invalid username or password)".to_string());
+            // Fallback to SSH keyboard-interactive (required by macOS Remote Login, PAM, RHEL, SUSE, etc.)
+            let mut kbd_ok = false;
+            if let Ok(mut resp) = session.authenticate_keyboard_interactive_start(user, None).await {
+                for _ in 0..3 {
+                    match resp {
+                        client::KeyboardInteractiveAuthResponse::Success => {
+                            kbd_ok = true;
+                            break;
+                        }
+                        client::KeyboardInteractiveAuthResponse::InfoRequest { prompts, .. } => {
+                            let answers = vec![pw.to_string(); prompts.len()];
+                            match session.authenticate_keyboard_interactive_respond(answers).await {
+                                Ok(next) => resp = next,
+                                Err(_) => break,
+                            }
+                        }
+                        client::KeyboardInteractiveAuthResponse::Failure { .. } => break,
+                    }
+                }
+            }
+            if !kbd_ok {
+                return Err("SSH password authentication rejected (invalid username or password)".to_string());
+            }
         }
     }
 
