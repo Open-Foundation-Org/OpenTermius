@@ -34,16 +34,15 @@ class TerminalStore {
   // Svelte 5 Runes
   tabs = $state<TerminalTab[]>([]);
   activeTabId = $state<string | null>(null);
-  splitTabId = $state<string | null>(null);
+  splitTab = $state<TerminalTab | null>(null);
+  splitPickerOpen = $state(false);
   splitDirection = $state<'horizontal' | 'vertical'>('horizontal');
 
   activeTab = $derived(
     this.tabs.find((tab) => tab.id === this.activeTabId) || null
   );
 
-  splitTab = $derived(
-    this.tabs.find((tab) => tab.id === this.splitTabId) || null
-  );
+  hasSplitPane = $derived(this.splitPickerOpen || this.splitTab !== null);
 
   tabCount = $derived(this.tabs.length);
 
@@ -77,39 +76,43 @@ class TerminalStore {
     return id;
   }
 
-  splitCurrent(hostId: string, label: string, config?: TerminalHostConfig, direction: 'horizontal' | 'vertical' = 'horizontal'): string {
+  openSplitPicker(direction: 'horizontal' | 'vertical' = 'horizontal') {
+    this.splitDirection = direction;
+    this.splitTab = null;
+    this.splitPickerOpen = true;
+  }
+
+  connectSplit(
+    hostId: string,
+    label: string,
+    config?: TerminalHostConfig,
+    meta?: { vaultId?: string; vaultName?: string }
+  ): string {
     const id = crypto.randomUUID();
-    const newTab: TerminalTab = {
+    this.splitTab = {
       id,
       hostId,
       label,
+      vaultId: meta?.vaultId,
+      vaultName: meta?.vaultName,
       startedAt: new Date().toISOString(),
       config,
       connected: false,
       active: true
     };
-    this.tabs.push(newTab);
-    this.splitTabId = id;
-    this.splitDirection = direction;
+    this.splitPickerOpen = false;
     return id;
   }
 
-  setSplit(tabId: string | null, direction: 'horizontal' | 'vertical' = 'horizontal') {
-    this.splitTabId = tabId;
-    this.splitDirection = direction;
-  }
-
   closeSplit() {
-    if (this.splitTabId) {
-      const idToClose = this.splitTabId;
-      this.splitTabId = null;
-      this.closeTab(idToClose);
-    }
+    this.splitTab = null;
+    this.splitPickerOpen = false;
   }
 
   closeTab(tabId: string) {
-    if (this.splitTabId === tabId) {
-      this.splitTabId = null;
+    if (this.splitTab?.id === tabId) {
+      this.splitTab = null;
+      return;
     }
     const idx = this.tabs.findIndex((t) => t.id === tabId);
     if (idx !== -1) {
@@ -121,10 +124,17 @@ class TerminalStore {
           if (nextActive) nextActive.active = true;
         }
       }
+      if (this.tabs.length === 0) {
+        this.closeSplit();
+      }
     }
   }
 
   setConnected(tabId: string, connected: boolean) {
+    if (this.splitTab?.id === tabId) {
+      this.splitTab.connected = connected;
+      return;
+    }
     const tab = this.tabs.find((t) => t.id === tabId);
     if (tab) {
       tab.connected = connected;

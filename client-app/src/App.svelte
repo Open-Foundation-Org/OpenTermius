@@ -78,8 +78,11 @@
   let isSessionSwitcherOpen = $state(false);
   let isVaultSwitcherOpen = $state(false);
   let isQuickConnectOpen = $state(false);
+  let isShortcutsOpen = $state(false);
   let quickConnectQuery = $state('');
   let quickConnectInput = $state<HTMLInputElement | null>(null);
+  let splitSearchQuery = $state('');
+  let splitSearchInput = $state<HTMLInputElement | null>(null);
   let isTerminalFocus = $state(false);
   let sftpSelectedHostId = $state('');
   let currentUserId = $state('');
@@ -101,16 +104,174 @@
     setTimeout(() => quickConnectInput?.focus(), 20);
   }
 
+  function cycleWorkspaceTab(delta: 1 | -1) {
+    // Order: [Hosts Dashboard (index 0), ...terminalStore.tabs]
+    const total = 1 + terminalStore.tabs.length;
+    if (total <= 1) return;
+    let currentIndex = 0;
+    if (activeNav === 'terminal' && terminalStore.activeTabId) {
+      const idx = terminalStore.tabs.findIndex((t) => t.id === terminalStore.activeTabId);
+      if (idx !== -1) currentIndex = idx + 1;
+    }
+    const nextIndex = (currentIndex + delta + total) % total;
+    if (nextIndex === 0) {
+      activeNav = 'hosts';
+    } else {
+      const target = terminalStore.tabs[nextIndex - 1];
+      if (target) {
+        terminalStore.selectTab(target.id);
+        activeNav = 'terminal';
+      }
+    }
+  }
+
+  function jumpToTabNumber(num: number) {
+    if (num === 1) {
+      activeNav = 'hosts';
+      return;
+    }
+    const target = terminalStore.tabs[num - 2];
+    if (target) {
+      terminalStore.selectTab(target.id);
+      activeNav = 'terminal';
+    }
+  }
+
+  function dispatchTerminalAction(action: 'clear' | 'zoom-in' | 'zoom-out' | 'zoom-reset') {
+    if (activeNav !== 'terminal') return;
+    window.dispatchEvent(new CustomEvent('opentermius:terminal-action', { detail: { action } }));
+  }
+
   function handleKeydown(e: KeyboardEvent) {
-    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'b') {
+    if (!isAuthenticated) return;
+    const isMac = platform.isMac;
+    const mod = isMac ? e.metaKey : e.ctrlKey;
+    const key = e.key.toLowerCase();
+    const inTerminal = activeNav === 'terminal';
+
+    if (e.key === 'Escape') {
+      if (isShortcutsOpen) { e.preventDefault(); isShortcutsOpen = false; return; }
+      if (isQuickConnectOpen) { e.preventDefault(); isQuickConnectOpen = false; return; }
+      return;
+    }
+
+    // Ctrl+Tab / Ctrl+Shift+Tab: Next / Previous Tab (all OS, identical to Termius & browsers)
+    if (e.ctrlKey && key === 'tab') {
       e.preventDefault();
-      isSidebarCollapsed = !isSidebarCollapsed;
-    } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 't') {
+      cycleWorkspaceTab(e.shiftKey ? -1 : 1);
+      return;
+    }
+
+    // macOS Cmd+Shift+[ / ] or Cmd+Option+Left / Right: Prev / Next Tab
+    if (isMac && e.metaKey && ((e.shiftKey && (e.key === '[' || e.key === '{' || e.key === ']' || e.key === '}')) || (e.altKey && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')))) {
+      e.preventDefault();
+      const goPrev = e.key === '[' || e.key === '{' || e.key === 'ArrowLeft';
+      cycleWorkspaceTab(goPrev ? -1 : 1);
+      return;
+    }
+
+    // Win/Linux Ctrl+Shift+[ / ]: Prev / Next Tab
+    if (!isMac && e.ctrlKey && e.shiftKey && (e.key === '[' || e.key === '{' || e.key === ']' || e.key === '}')) {
+      e.preventDefault();
+      cycleWorkspaceTab(e.key === '[' || e.key === '{' ? -1 : 1);
+      return;
+    }
+
+    if (!mod) return;
+
+    // Cmd/Ctrl + 1..9: Jump directly to Hosts (1) or Terminal Tab #1..#8 (2..9)
+    if (!e.shiftKey && !e.altKey && e.key >= '1' && e.key <= '9') {
+      e.preventDefault();
+      jumpToTabNumber(Number(e.key));
+      return;
+    }
+
+    // Quick Connect / Command Palette: Cmd+T / Cmd+K / Cmd+J (Win/Linux: Ctrl+J, or Ctrl+Shift+T/K in terminal, Ctrl+T/K outside)
+    if (key === 'j' && !e.shiftKey) {
       e.preventDefault();
       openQuickConnect();
-    } else if (e.key === 'Escape' && isQuickConnectOpen) {
+      return;
+    }
+    if ((key === 't' || key === 'k') && (isMac ? !e.shiftKey : (e.shiftKey || !inTerminal))) {
       e.preventDefault();
-      isQuickConnectOpen = false;
+      openQuickConnect();
+      return;
+    }
+
+    // Close active terminal tab (or split pane): Cmd+W (Mac) / Ctrl+Shift+W (Win/Linux)
+    if (key === 'w' && (isMac ? !e.shiftKey : e.shiftKey)) {
+      if (activeNav === 'terminal') {
+        e.preventDefault();
+        if (terminalStore.hasSplitPane) {
+          terminalStore.closeSplit();
+        } else if (terminalStore.activeTabId) {
+          terminalStore.closeTab(terminalStore.activeTabId);
+          if (terminalStore.tabCount === 0) activeNav = 'hosts';
+        }
+      }
+      return;
+    }
+
+    // Split Right / Split Down: Cmd+D / Cmd+Shift+D (Mac), Ctrl+Shift+D / Ctrl+Alt+D (Win/Linux)
+    if (key === 'd' && activeNav === 'terminal' && terminalStore.activeTab) {
+      if (isMac) {
+        e.preventDefault();
+        handleSplitTerminal(e.shiftKey ? 'vertical' : 'horizontal');
+        return;
+      } else if (e.shiftKey || e.altKey) {
+        e.preventDefault();
+        handleSplitTerminal(e.altKey ? 'vertical' : 'horizontal');
+        return;
+      }
+    }
+
+    // New Local Shell: Cmd/Ctrl + Shift + L (Desktop)
+    if (key === 'l' && e.shiftKey && !platform.isAndroid) {
+      e.preventDefault();
+      handleNewLocalTab();
+      return;
+    }
+
+    // Clear Terminal: Cmd + Shift + K (Mac)
+    if (isMac && e.shiftKey && key === 'k' && inTerminal) {
+      e.preventDefault();
+      dispatchTerminalAction('clear');
+      return;
+    }
+
+    // Toggle Sidebar: Cmd+B (Mac) / Ctrl+B (outside terminal) or Ctrl+Shift+B
+    if (key === 'b' && (isMac || e.shiftKey || !inTerminal)) {
+      e.preventDefault();
+      isSidebarCollapsed = !isSidebarCollapsed;
+      return;
+    }
+
+    // Settings: Cmd/Ctrl + ,
+    if (e.key === ',') {
+      e.preventDefault();
+      activeNav = 'settings';
+      return;
+    }
+
+    // Shortcuts Cheatsheet: Cmd/Ctrl + /
+    if (e.key === '/') {
+      e.preventDefault();
+      isShortcutsOpen = !isShortcutsOpen;
+      return;
+    }
+
+    // Terminal Font Zoom: Cmd/Ctrl + = / - / 0
+    if (inTerminal && !e.shiftKey) {
+      if (e.key === '=' || e.key === '+') {
+        e.preventDefault();
+        dispatchTerminalAction('zoom-in');
+      } else if (e.key === '-') {
+        e.preventDefault();
+        dispatchTerminalAction('zoom-out');
+      } else if (e.key === '0') {
+        e.preventDefault();
+        dispatchTerminalAction('zoom-reset');
+      }
     }
   }
 
@@ -147,6 +308,19 @@
   let quickConnectHosts = $derived(
     hosts.filter((h) => {
       const q = quickConnectQuery.trim().toLowerCase();
+      if (!q) return true;
+      return (
+        h.label.toLowerCase().includes(q) ||
+        h.address.toLowerCase().includes(q) ||
+        h.username.toLowerCase().includes(q) ||
+        (h.group || '').toLowerCase().includes(q)
+      );
+    })
+  );
+
+  let splitPickerHosts = $derived(
+    hosts.filter((h) => {
+      const q = splitSearchQuery.trim().toLowerCase();
       if (!q) return true;
       return (
         h.label.toLowerCase().includes(q) ||
@@ -540,13 +714,46 @@
 
   function handleSplitTerminal(direction: 'horizontal' | 'vertical') {
     if (!terminalStore.activeTab) return;
-    const curr = terminalStore.activeTab;
-    terminalStore.splitCurrent(
-      curr.hostId,
-      `${curr.label} (Split)`,
-      curr.config,
-      direction
+    splitSearchQuery = '';
+    terminalStore.openSplitPicker(direction);
+    setTimeout(() => splitSearchInput?.focus(), 30);
+  }
+
+  function handleConnectSplitHost(host: any) {
+    terminalStore.connectSplit(
+      host.id,
+      host.label,
+      {
+        address: host.address,
+        port: host.port || 22,
+        username: host.username || 'root',
+        authType: host.authType || 'password',
+        password: host.password || '',
+        privateKey: host.privateKey || '',
+        passphrase: host.passphrase || ''
+      },
+      {
+        vaultId: activeVault?.id,
+        vaultName: activeVault?.name
+      }
     );
+  }
+
+  function handleConnectSplitLocal() {
+    terminalStore.connectSplit(`local-split-${Date.now()}`, 'Local Shell', {
+      address: '',
+      port: 22,
+      username: ''
+    });
+  }
+
+  function handleDuplicateCurrentToSplit() {
+    const curr = terminalStore.activeTab;
+    if (!curr) return;
+    terminalStore.connectSplit(curr.hostId, curr.label, curr.config, {
+      vaultId: curr.vaultId,
+      vaultName: curr.vaultName
+    });
   }
 
   async function handleImportHosts(importedList: any[]) {
@@ -773,7 +980,7 @@
     (window as any).AndroidClipboard?.setKeepAliveSessions?.(count);
   });
 
-  const APP_VERSION = '0.5.3';
+  const APP_VERSION = '0.6.0';
   type DesktopUpdate = Awaited<ReturnType<typeof import('@tauri-apps/plugin-updater').check>>;
   let availableUpdate = $state<DesktopUpdate | null>(null);
   let releaseFallback = $state<{ version: string; url: string } | null>(null);
@@ -1649,9 +1856,9 @@
         <!-- Live Terminal Screen (Persistent in DOM with Split Support) -->
         <div class="h-full w-full {activeNav === 'terminal' ? 'block' : 'hidden'}">
           {#if terminalStore.tabCount > 0}
-            <div class="relative h-full w-full flex {terminalStore.splitTab ? (terminalStore.splitDirection === 'horizontal' ? 'flex-col md:flex-row' : 'flex-col') : ''}">
+            <div class="relative h-full w-full flex {terminalStore.hasSplitPane ? (terminalStore.splitDirection === 'horizontal' ? 'flex-col md:flex-row' : 'flex-col') : ''}">
               <!-- Primary Terminal Pane -->
-              <div class="relative flex-1 min-w-0 min-h-0 {terminalStore.splitTab ? (terminalStore.splitDirection === 'horizontal' ? 'border-b md:border-b-0 md:border-r border-[#1f1f2e]' : 'border-b border-[#1f1f2e]') : ''}">
+              <div class="relative flex-1 min-w-0 min-h-0 {terminalStore.hasSplitPane ? (terminalStore.splitDirection === 'horizontal' ? 'border-b md:border-b-0 md:border-r border-[#1f1f2e]' : 'border-b border-[#1f1f2e]') : ''}">
                 {#each terminalStore.tabs as tab (tab.id)}
                   <div
                     class="absolute inset-0 h-full w-full"
@@ -1673,18 +1880,107 @@
                 {/each}
               </div>
 
-              <!-- Secondary Split Pane (if active) -->
-              {#if terminalStore.splitTab}
-                <div class="relative flex-1 min-w-0 min-h-0">
-                  <TerminalView
-                    sessionId={terminalStore.splitTab.id}
-                    title={terminalStore.splitTab.label}
-                    hostId={terminalStore.splitTab.hostId}
-                    config={terminalStore.splitTab.config}
-                    active={activeNav === 'terminal'}
-                    isSplitPane={true}
-                    onClosePane={() => terminalStore.closeSplit()}
-                  />
+              <!-- Secondary Split Pane (Termius-style Inline Host Picker -> Connected Session) -->
+              {#if terminalStore.hasSplitPane}
+                <div class="relative flex-1 min-w-0 min-h-0 bg-[#0b0b10]">
+                  {#if terminalStore.splitTab}
+                    {#key terminalStore.splitTab.id}
+                      <TerminalView
+                        sessionId={terminalStore.splitTab.id}
+                        title={terminalStore.splitTab.label}
+                        hostId={terminalStore.splitTab.hostId}
+                        config={terminalStore.splitTab.config}
+                        active={activeNav === 'terminal'}
+                        isSplitPane={true}
+                        onClosePane={() => terminalStore.closeSplit()}
+                      />
+                    {/key}
+                  {:else}
+                    <div class="flex h-full flex-col">
+                      <div class="flex h-10 shrink-0 items-center justify-between border-b border-[#1a1a24] bg-[#0d0d12] px-3">
+                        <span class="text-xs font-semibold text-neutral-200">Select Host for Split Pane</span>
+                        <button
+                          type="button"
+                          onclick={() => terminalStore.closeSplit()}
+                          class="flex h-6 w-6 items-center justify-center rounded bg-[#181822] text-neutral-400 hover:text-rose-400 transition cursor-pointer"
+                          title="Close Split Pane"
+                          aria-label="Close Split Pane"
+                        >
+                          <X class="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+
+                      <div class="p-3 border-b border-[#181822] space-y-2.5 shrink-0">
+                        <div class="relative">
+                          <Search class="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-neutral-500" />
+                          <input
+                            bind:this={splitSearchInput}
+                            type="text"
+                            bind:value={splitSearchQuery}
+                            onkeydown={(e) => {
+                              if (e.key === 'Escape') {
+                                terminalStore.closeSplit();
+                              } else if (e.key === 'Enter' && splitPickerHosts.length > 0) {
+                                handleConnectSplitHost(splitPickerHosts[0]);
+                              }
+                            }}
+                            placeholder="Search host to open in split pane..."
+                            class="w-full rounded-lg border border-white/[0.08] bg-[#121218] pl-8 pr-3 py-2 text-xs text-white placeholder-neutral-500 outline-none focus:border-emerald-500/60"
+                          />
+                        </div>
+
+                        <div class="flex flex-wrap items-center gap-1.5">
+                          {#if terminalStore.activeTab}
+                            <button
+                              type="button"
+                              onclick={handleDuplicateCurrentToSplit}
+                              class="inline-flex items-center gap-1.5 rounded-md border border-white/[0.08] bg-[#14141d] px-2.5 py-1 text-[11px] text-neutral-200 hover:border-emerald-500/40 hover:text-emerald-300 transition cursor-pointer"
+                            >
+                              <Terminal class="h-3 w-3 text-emerald-400" />
+                              <span>Duplicate: {terminalStore.activeTab.label}</span>
+                            </button>
+                          {/if}
+                          {#if !platform.isAndroid}
+                            <button
+                              type="button"
+                              onclick={handleConnectSplitLocal}
+                              class="inline-flex items-center gap-1.5 rounded-md border border-white/[0.08] bg-[#14141d] px-2.5 py-1 text-[11px] text-neutral-300 hover:border-white/[0.18] hover:text-white transition cursor-pointer"
+                            >
+                              <Laptop class="h-3 w-3 text-neutral-400" />
+                              <span>Local Shell</span>
+                            </button>
+                          {/if}
+                        </div>
+                      </div>
+
+                      <div class="flex-1 overflow-y-auto p-2.5 space-y-1">
+                        {#if splitPickerHosts.length === 0}
+                          <div class="py-10 text-center text-xs text-neutral-500">
+                            No matching hosts found.
+                          </div>
+                        {:else}
+                          {#each splitPickerHosts as h (h.id)}
+                            <button
+                              type="button"
+                              onclick={() => handleConnectSplitHost(h)}
+                              class="flex w-full items-center justify-between gap-3 rounded-lg border border-transparent bg-[#121217] px-3 py-2 text-left hover:border-emerald-500/30 hover:bg-[#171720] transition cursor-pointer"
+                            >
+                              <div class="flex items-center gap-2.5 min-w-0">
+                                <Terminal class="h-3.5 w-3.5 text-emerald-400 shrink-0" />
+                                <div class="min-w-0">
+                                  <p class="text-xs font-medium text-neutral-100 truncate">{h.label}</p>
+                                  <p class="text-[11px] font-mono text-neutral-500 truncate">{h.username}@{h.address}:{h.port}</p>
+                                </div>
+                              </div>
+                              {#if h.group && h.group !== 'Default'}
+                                <span class="rounded bg-white/[0.05] px-1.5 py-0.5 text-[10px] text-neutral-400 shrink-0">{h.group}</span>
+                              {/if}
+                            </button>
+                          {/each}
+                        {/if}
+                      </div>
+                    </div>
+                  {/if}
                 </div>
               {/if}
             </div>
@@ -2160,6 +2456,31 @@
         </div>
 
         <div class="max-h-72 overflow-y-auto p-2 space-y-1">
+          {#if terminalStore.tabs.length > 0 && !quickConnectQuery.trim()}
+            <div class="px-2 pt-1 pb-0.5 text-[10px] font-semibold uppercase tracking-wider text-neutral-500">
+              Open Sessions
+            </div>
+            {#each terminalStore.tabs as tab, i (tab.id)}
+              <button
+                type="button"
+                onclick={() => {
+                  isQuickConnectOpen = false;
+                  terminalStore.selectTab(tab.id);
+                  activeNav = 'terminal';
+                }}
+                class="flex w-full items-center justify-between gap-3 rounded-xl px-3 py-2 text-left hover:bg-[#1c1c2a] transition cursor-pointer"
+              >
+                <div class="flex items-center gap-2.5 min-w-0">
+                  <span class="h-2 w-2 rounded-full bg-emerald-400 shrink-0"></span>
+                  <span class="text-xs font-medium text-white truncate">{tab.label}</span>
+                </div>
+                <span class="rounded bg-[#1a1a26] px-1.5 py-0.5 text-[10px] font-mono text-neutral-400 shrink-0">
+                  {platform.isMac ? `⌘${i + 2}` : `Ctrl+${i + 2}`}
+                </span>
+              </button>
+            {/each}
+            <div class="my-1 border-t border-[#222232]"></div>
+          {/if}
           {#if quickConnectHosts.length === 0}
             <div class="px-3 py-6 text-center text-xs text-neutral-500">
               {hosts.length === 0 ? 'No remote hosts saved yet.' : 'No matching remote hosts.'}
@@ -2289,6 +2610,56 @@
         >
           Allow Control
         </button>
+      </div>
+    </div>
+  {/if}
+
+  {#if isShortcutsOpen}
+    <div
+      class="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-xs p-4"
+      onclick={(e) => { if (e.target === e.currentTarget) isShortcutsOpen = false; }}
+      role="presentation"
+    >
+      <div class="w-full max-w-md rounded-2xl border border-[#28283a] bg-[#13131c] p-5 shadow-2xl space-y-4 text-xs">
+        <div class="flex items-center justify-between border-b border-white/[0.06] pb-3">
+          <h3 class="text-sm font-semibold text-white">Keyboard Shortcuts</h3>
+          <button type="button" onclick={() => (isShortcutsOpen = false)} class="text-neutral-400 hover:text-white">
+            <X class="h-4 w-4" />
+          </button>
+        </div>
+        <div class="space-y-2 text-neutral-300">
+          {#each (platform.isMac ? [
+            ['Quick Connect / Jump to Tab', '⌘T / ⌘K / ⌘J'],
+            ['Hosts Dashboard', '⌘1'],
+            ['Jump to Terminal Tab 1–8', '⌘2 … ⌘9'],
+            ['Next / Previous Tab', 'Ctrl+Tab / ⌘⇧] · ⌘⇧['],
+            ['Close Active Tab / Split', '⌘W'],
+            ['Split Right / Split Down', '⌘D / ⌘⇧D'],
+            ['New Local Shell', '⌘⇧L'],
+            ['Clear Terminal Buffer', '⌘⇧K'],
+            ['Zoom In / Out / Reset', '⌘+ / ⌘- / ⌘0'],
+            ['Toggle Sidebar', '⌘B'],
+            ['Settings', '⌘,'],
+            ['Shortcuts Cheatsheet', '⌘/']
+          ] : [
+            ['Quick Connect / Jump to Tab', 'Ctrl+J / Ctrl+Shift+K'],
+            ['Hosts Dashboard', 'Ctrl+1'],
+            ['Jump to Terminal Tab 1–8', 'Ctrl+2 … Ctrl+9'],
+            ['Next / Previous Tab', 'Ctrl+Tab / Ctrl+Shift+Tab'],
+            ['Close Active Tab / Split', 'Ctrl+Shift+W'],
+            ['Split Right / Split Down', 'Ctrl+Shift+D / Ctrl+Alt+D'],
+            ['New Local Shell', 'Ctrl+Shift+L'],
+            ['Zoom In / Out / Reset', 'Ctrl++ / Ctrl+- / Ctrl+0'],
+            ['Toggle Sidebar', 'Ctrl+Shift+B'],
+            ['Settings', 'Ctrl+,'],
+            ['Shortcuts Cheatsheet', 'Ctrl+/']
+          ]) as [label, keys]}
+            <div class="flex items-center justify-between py-1 border-b border-white/[0.04] last:border-0">
+              <span class="text-neutral-300">{label}</span>
+              <kbd class="rounded border border-white/[0.1] bg-[#1a1a26] px-2 py-0.5 font-mono text-[11px] text-emerald-300">{keys}</kbd>
+            </div>
+          {/each}
+        </div>
       </div>
     </div>
   {/if}

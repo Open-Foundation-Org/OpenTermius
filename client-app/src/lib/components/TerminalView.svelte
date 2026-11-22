@@ -101,6 +101,25 @@
   const relayDecoder = new TextDecoder();
   let sessionStartMs = 0;
 
+  function safeFit() {
+    if (!active || !terminalContainer || !fitAddon || !term) return;
+    const rect = terminalContainer.getBoundingClientRect();
+    if (rect.width < 40 || rect.height < 40) return;
+    try {
+      fitAddon.fit();
+      term.refresh(0, term.rows - 1);
+    } catch {}
+  }
+
+  $effect(() => {
+    if (active && term && fitAddon) {
+      requestAnimationFrame(() => {
+        safeFit();
+        if (!platform.isMobile) term?.focus();
+      });
+    }
+  });
+
   function getInitials(name: string): string {
     const parts = (name || '?').trim().split(/\s+/);
     if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
@@ -657,16 +676,31 @@
     }
 
     setTimeout(() => {
-      try {
-        fitAddon?.fit();
-      } catch {}
+      safeFit();
     }, 20);
 
     term.onData((data) => {
       sendTerminalInput(applyModifiers(data));
     });
 
+    // Let app-level Termius shortcuts bubble to window instead of being swallowed by xterm
+    term.attachCustomKeyEventHandler((e: KeyboardEvent) => {
+      const k = e.key.toLowerCase();
+      if (e.ctrlKey && k === 'tab') return false;
+      if (platform.isMac && e.metaKey) {
+        if (/^[1-90=\-+,/\[\]]$/.test(k) || ['t', 'k', 'j', 'w', 'd', 'b'].includes(k)) return false;
+        if (e.altKey && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) return false;
+        if (e.shiftKey && ['l', 'k', 'd'].includes(k)) return false;
+      } else if (!platform.isMac && e.ctrlKey) {
+        if (/^[1-90=\-+,/]$/.test(k) || k === 'j') return false;
+        if (e.shiftKey && ['t', 'k', 'w', 'd', 'b', 'l', '[', ']'].includes(k)) return false;
+        if (e.altKey && k === 'd') return false;
+      }
+      return true;
+    });
+
     term.onResize(({ cols, rows }) => {
+      if (remoteConfig || cols < 10 || rows < 3) return;
       import('@tauri-apps/api/core').then(({ invoke }) => {
         invoke('terminal_resize', { sessionId: activeSessionId, cols, rows }).catch(() => {});
       });
@@ -718,11 +752,9 @@
     terminalContainer.addEventListener('touchend', onTouchEnd, { passive: true, capture: true });
     terminalContainer.addEventListener('touchcancel', onTouchEnd, { passive: true, capture: true });
 
-    // Auto-fit on window resize
+    // Auto-fit on window resize (ignored while hidden so display:none never sends tiny PTY dims)
     resizeObserver = new ResizeObserver(() => {
-      try {
-        fitAddon?.fit();
-      } catch {}
+      safeFit();
     });
     resizeObserver.observe(terminalContainer);
 
@@ -740,8 +772,31 @@
         startHostRelay();
       }
     };
+    const handleTerminalActionEvent = (e: Event) => {
+      if (!active || isSplitPane) return;
+      const action = (e as CustomEvent<{ action: string }>).detail?.action;
+      if (action === 'clear') {
+        term?.clear();
+      } else if (action === 'zoom-in') {
+        fontSize = Math.min(24, fontSize + 1);
+        if (term) term.options.fontSize = fontSize;
+        localStorage.setItem('opentermius_term_fontsize', String(fontSize));
+        safeFit();
+      } else if (action === 'zoom-out') {
+        fontSize = Math.max(9, fontSize - 1);
+        if (term) term.options.fontSize = fontSize;
+        localStorage.setItem('opentermius_term_fontsize', String(fontSize));
+        safeFit();
+      } else if (action === 'zoom-reset') {
+        fontSize = platform.isMobile ? 12 : 14;
+        if (term) term.options.fontSize = fontSize;
+        localStorage.setItem('opentermius_term_fontsize', String(fontSize));
+        safeFit();
+      }
+    };
     window.addEventListener('opentermius:run-snippet', handleSnippetEvent);
     window.addEventListener('opentermius:start-relay', handleStartRelayEvent);
+    window.addEventListener('opentermius:terminal-action', handleTerminalActionEvent);
 
     if (remoteConfig) {
       connectRemoteViewer();
@@ -752,6 +807,7 @@
     return () => {
       window.removeEventListener('opentermius:run-snippet', handleSnippetEvent);
       window.removeEventListener('opentermius:start-relay', handleStartRelayEvent);
+      window.removeEventListener('opentermius:terminal-action', handleTerminalActionEvent);
       terminalContainer?.removeEventListener('touchstart', onTouchStart, true);
       terminalContainer?.removeEventListener('touchmove', onTouchMove, true);
       terminalContainer?.removeEventListener('touchend', onTouchEnd, true);
