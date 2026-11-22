@@ -73,11 +73,14 @@ function resolveDefaultApiBase(): string {
 class GatewayApiClient {
   private apiBase: string = 'http://localhost:8080/api/v1';
   private token: string | null = null;
+  private refreshToken: string | null = null;
+  private refreshPromise: Promise<boolean> | null = null;
 
   constructor() {
     const fallback = resolveDefaultApiBase();
     if (typeof window !== 'undefined') {
       this.token = localStorage.getItem('gateway_admin_token');
+      this.refreshToken = localStorage.getItem('gateway_admin_refresh_token');
       const saved = localStorage.getItem('gateway_admin_api_base');
       const pageHost = window.location.hostname;
       const isRemotePage = pageHost && pageHost !== 'localhost' && pageHost !== '127.0.0.1';
@@ -99,10 +102,20 @@ class GatewayApiClient {
     return this.apiBase;
   }
 
-  setToken(token: string) {
+  setToken(token: string, refreshToken?: string) {
     this.token = token;
     if (typeof window !== 'undefined') {
       localStorage.setItem('gateway_admin_token', token);
+    }
+    if (refreshToken !== undefined) {
+      this.refreshToken = refreshToken || null;
+      if (typeof window !== 'undefined') {
+        if (refreshToken) {
+          localStorage.setItem('gateway_admin_refresh_token', refreshToken);
+        } else {
+          localStorage.removeItem('gateway_admin_refresh_token');
+        }
+      }
     }
   }
 
@@ -112,23 +125,72 @@ class GatewayApiClient {
 
   clearToken() {
     this.token = null;
+    this.refreshToken = null;
     if (typeof window !== 'undefined') {
       localStorage.removeItem('gateway_admin_token');
+      localStorage.removeItem('gateway_admin_refresh_token');
     }
   }
 
-  private async request<T>(path: string, options: RequestInit = {}): Promise<T> {
+  private async tryRefresh(): Promise<boolean> {
+    if (!this.refreshToken) return false;
+    if (this.refreshPromise) return this.refreshPromise;
+
+    this.refreshPromise = (async () => {
+      try {
+        const res = await this.request<{ user: GatewayUser; token: string; refresh_token?: string }>(
+          '/auth/refresh',
+          {
+            method: 'POST',
+            body: JSON.stringify({ refresh_token: this.refreshToken })
+          },
+          true
+        );
+        if (!res.token) return false;
+        this.setToken(res.token, res.refresh_token ?? this.refreshToken ?? undefined);
+        return true;
+      } catch {
+        return false;
+      } finally {
+        this.refreshPromise = null;
+      }
+    })();
+
+    return this.refreshPromise;
+  }
+
+  private async request<T>(path: string, options: RequestInit = {}, skipRefresh = false): Promise<T> {
     const headers = new Headers(options.headers || {});
     headers.set('Content-Type', 'application/json');
 
-    if (this.token) {
+    if (this.token && path !== '/auth/login' && path !== '/auth/refresh') {
       headers.set('Authorization', `Bearer ${this.token}`);
     }
 
-    const res = await fetch(`${this.apiBase}${path}`, {
-      ...options,
-      headers
-    });
+    const controller = !options.signal ? new AbortController() : null;
+    const timeoutId = controller ? setTimeout(() => controller.abort(), 8000) : null;
+
+    let res: Response;
+    try {
+      res = await fetch(`${this.apiBase}${path}`, {
+        ...options,
+        headers,
+        signal: options.signal ?? controller?.signal
+      });
+    } finally {
+      if (timeoutId) clearTimeout(timeoutId);
+    }
+
+    if (
+      res.status === 401 &&
+      !skipRefresh &&
+      path !== '/auth/login' &&
+      path !== '/auth/refresh' &&
+      this.refreshToken
+    ) {
+      const ok = await this.tryRefresh();
+      if (ok) return this.request<T>(path, options, true);
+    }
 
     if (!res.ok) {
       let msg = `Gateway Error: ${res.status} ${res.statusText}`;
@@ -136,27 +198,29 @@ class GatewayApiClient {
         const body = await res.json();
         if (body.error) msg = body.error;
       } catch {}
-      throw new Error(msg);
+      const err = new Error(msg) as Error & { status?: number };
+      err.status = res.status;
+      throw err;
     }
 
     return res.json() as Promise<T>;
   }
 
   async login(email: string, password: string) {
-    const res = await this.request<{ user: GatewayUser; token: string }>('/auth/login', {
+    const res = await this.request<{ user: GatewayUser; token: string; refresh_token?: string }>('/auth/login', {
       method: 'POST',
       body: JSON.stringify({ email, password })
     });
-    this.setToken(res.token);
+    this.setToken(res.token, res.refresh_token);
     return res;
   }
 
   async register(email: string, password: string, name: string) {
-    const res = await this.request<{ user: GatewayUser; token: string }>('/auth/register', {
+    const res = await this.request<{ user: GatewayUser; token: string; refresh_token?: string }>('/auth/register', {
       method: 'POST',
       body: JSON.stringify({ email, password, name })
     });
-    this.setToken(res.token);
+    this.setToken(res.token, res.refresh_token);
     return res;
   }
 
