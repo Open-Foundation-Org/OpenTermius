@@ -7,6 +7,22 @@ const allowedHosts = allowedHostsEnv
   ? allowedHostsEnv.split(',').map((h) => h.trim()).filter(Boolean)
   : true;
 
+const apiProxyTarget =
+  process.env.API_PROXY_TARGET?.trim() ||
+  `http://127.0.0.1:${process.env.SERVER_PORT?.trim() || '8080'}`;
+
+const proxy = {
+  '/api': {
+    target: apiProxyTarget,
+    changeOrigin: true,
+    ws: true
+  },
+  '/health': {
+    target: apiProxyTarget,
+    changeOrigin: true
+  }
+};
+
 export default defineConfig({
   plugins: [
     tailwindcss(),
@@ -14,10 +30,12 @@ export default defineConfig({
   ],
   server: {
     port: 5174,
-    allowedHosts
+    allowedHosts,
+    proxy
   },
   preview: {
     port: 5174,
-    allowedHosts
+    allowedHosts,
+    proxy
   }
 });

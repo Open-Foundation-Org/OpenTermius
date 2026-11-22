@@ -92,13 +92,10 @@ function resolveDefaultApiBase(): string {
   if (envBase && envBase.trim()) {
     return envBase.trim().replace(/\/+$/, '');
   }
-  const envPort = ((import.meta as any).env?.VITE_API_PORT as string | undefined)?.trim() || '8080';
-  if (typeof window !== 'undefined') {
-    const { protocol, hostname } = window.location;
-    if (hostname) {
-      return `${protocol}//${hostname}:${envPort}/api/v1`;
-    }
+  if (typeof window !== 'undefined' && window.location.origin) {
+    return `${window.location.origin}/api/v1`;
   }
+  const envPort = ((import.meta as any).env?.VITE_API_PORT as string | undefined)?.trim() || '8080';
   return `http://localhost:${envPort}/api/v1`;
 }
 
@@ -117,7 +114,11 @@ class GatewayApiClient {
       const pageHost = window.location.hostname;
       const isRemotePage = pageHost && pageHost !== 'localhost' && pageHost !== '127.0.0.1';
       const isStaleLocalhost = saved && /^https?:\/\/(localhost|127\.0\.0\.1)(:|\/|$)/.test(saved);
-      this.apiBase = saved && !(isRemotePage && isStaleLocalhost) ? saved : fallback;
+      const isStaleSameHost8080 =
+        saved &&
+        window.location.port === '' &&
+        saved === `${window.location.protocol}//${pageHost}:8080/api/v1`;
+      this.apiBase = saved && !(isRemotePage && isStaleLocalhost) && !isStaleSameHost8080 ? saved : fallback;
     } else {
       this.apiBase = fallback;
     }
@@ -199,8 +200,9 @@ class GatewayApiClient {
       headers.set('Authorization', `Bearer ${this.token}`);
     }
 
+    const timeoutMs = /\/(smtp|invites)/.test(path) ? 20000 : 10000;
     const controller = !options.signal ? new AbortController() : null;
-    const timeoutId = controller ? setTimeout(() => controller.abort(), 8000) : null;
+    const timeoutId = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
 
     let res: Response;
     try {
@@ -209,6 +211,11 @@ class GatewayApiClient {
         headers,
         signal: options.signal ?? controller?.signal
       });
+    } catch (err: any) {
+      if (err?.name === 'AbortError' || controller?.signal.aborted) {
+        throw new Error(`Request timeout (${timeoutMs / 1000}s) — cek koneksi ke Gateway API (${this.apiBase})`);
+      }
+      throw err;
     } finally {
       if (timeoutId) clearTimeout(timeoutId);
     }
