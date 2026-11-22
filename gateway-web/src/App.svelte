@@ -106,6 +106,15 @@
   let testEmailTo = $state('');
   let isTestingSmtp = $state(false);
 
+  // Admin Account Profile (Change Name / Email / Password)
+  let profileName = $state('');
+  let profileEmail = $state('');
+  let profileCurrentPassword = $state('');
+  let profileNewPassword = $state('');
+  let profileConfirmPassword = $state('');
+  let isSavingProfile = $state(false);
+  let profileError = $state<string | null>(null);
+
   // Public Invite Acceptance (?invite=<token>)
   let inviteToken = $state<string | null>(
     typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('invite') : null
@@ -174,6 +183,8 @@
 
     try {
       currentUser = await gatewayApi.getMe();
+      profileName = currentUser.name;
+      profileEmail = currentUser.email;
       isAuthenticated = true;
       await refreshData();
     } catch (err: unknown) {
@@ -260,6 +271,8 @@
       gatewayApi.setApiBase(backendUrl.trim());
       const res = await gatewayApi.login(authEmail.trim(), authPassword);
       currentUser = res.user;
+      profileName = res.user.name;
+      profileEmail = res.user.email;
       isAuthenticated = true;
       authPassword = '';
       await refreshData();
@@ -421,6 +434,45 @@
       errorMessage = err instanceof Error ? err.message : 'Failed to resend invite';
     } finally {
       resendingInviteId = null;
+    }
+  }
+
+  async function handleSaveProfile(e?: SubmitEvent) {
+    e?.preventDefault();
+    if (!profileCurrentPassword) {
+      profileError = 'Current password is required to save changes.';
+      return;
+    }
+    if (profileNewPassword && profileNewPassword.length < 8) {
+      profileError = 'New password must be at least 8 characters.';
+      return;
+    }
+    if (profileNewPassword && profileNewPassword !== profileConfirmPassword) {
+      profileError = 'New passwords do not match.';
+      return;
+    }
+
+    isSavingProfile = true;
+    profileError = null;
+    try {
+      const updated = await gatewayApi.updateMe({
+        current_password: profileCurrentPassword,
+        name: profileName.trim(),
+        email: profileEmail.trim(),
+        new_password: profileNewPassword || undefined
+      });
+      currentUser = updated;
+      profileName = updated.name;
+      profileEmail = updated.email;
+      profileCurrentPassword = '';
+      profileNewPassword = '';
+      profileConfirmPassword = '';
+      users = users.map((u) => (u.id === updated.id ? updated : u));
+      showBanner('Admin account updated successfully.');
+    } catch (err: unknown) {
+      profileError = err instanceof Error ? err.message : 'Failed to update account';
+    } finally {
+      isSavingProfile = false;
     }
   }
 
@@ -1015,7 +1067,7 @@
                       <td class="px-4 py-2.5 font-medium text-white">{u.name}</td>
                       <td class="px-4 py-2.5 font-mono text-emerald-400">{u.email}</td>
                       <td class="px-4 py-2.5">
-                        {#if u.id === currentUser?.id}
+                        {#if u.role === 'admin' || u.id === currentUser?.id}
                           <span class="rounded bg-amber-500/15 border border-amber-500/30 px-2 py-0.5 text-[10px] font-semibold text-amber-300">ADMIN</span>
                         {:else}
                           <span class="rounded bg-white/[0.06] px-2 py-0.5 text-[10px] font-medium text-neutral-300">USER</span>
@@ -1181,8 +1233,97 @@
         <div class="space-y-5 max-w-2xl text-xs">
           <div>
             <h2 class="text-base font-semibold text-white tracking-tight">Settings</h2>
-            <p class="text-xs text-neutral-400 mt-0.5">Gateway API connection and SMTP email delivery for invites &amp; notifications.</p>
+            <p class="text-xs text-neutral-400 mt-0.5">Admin account credentials, Gateway API, and SMTP email delivery.</p>
           </div>
+
+          <!-- Admin Account Security (Change Name / Email / Password) -->
+          <form
+            onsubmit={handleSaveProfile}
+            class="rounded-xl border border-white/[0.06] bg-[#121217] p-4 space-y-3.5"
+          >
+            <div>
+              <h3 class="text-xs font-semibold text-white flex items-center gap-1.5">
+                <Lock class="h-3.5 w-3.5 text-emerald-400" /> Admin Account &amp; Password
+              </h3>
+              <p class="text-[11px] text-neutral-400 mt-0.5">Change your admin display name, login email, or password. Your Admin role stays preserved.</p>
+            </div>
+
+            {#if profileError}
+              <div class="rounded-lg bg-rose-950/40 border border-rose-500/30 p-2.5 text-rose-300 text-[11px]">
+                {profileError}
+              </div>
+            {/if}
+
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label for="prof-name" class="block font-medium text-neutral-400 mb-1">Display Name</label>
+                <input
+                  id="prof-name"
+                  type="text"
+                  required
+                  bind:value={profileName}
+                  class="w-full rounded-lg border border-white/[0.08] bg-[#0b0b10] px-3 py-2 text-white outline-none focus:border-emerald-500/70"
+                />
+              </div>
+              <div>
+                <label for="prof-email" class="block font-medium text-neutral-400 mb-1">Admin Email</label>
+                <input
+                  id="prof-email"
+                  type="email"
+                  required
+                  bind:value={profileEmail}
+                  class="w-full rounded-lg border border-white/[0.08] bg-[#0b0b10] px-3 py-2 text-white font-mono outline-none focus:border-emerald-500/70"
+                />
+              </div>
+            </div>
+
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label for="prof-new-pw" class="block font-medium text-neutral-400 mb-1">New Password (optional)</label>
+                <input
+                  id="prof-new-pw"
+                  type="password"
+                  autocomplete="new-password"
+                  bind:value={profileNewPassword}
+                  placeholder="Leave blank to keep current"
+                  class="w-full rounded-lg border border-white/[0.08] bg-[#0b0b10] px-3 py-2 text-white outline-none focus:border-emerald-500/70"
+                />
+              </div>
+              <div>
+                <label for="prof-confirm-pw" class="block font-medium text-neutral-400 mb-1">Confirm New Password</label>
+                <input
+                  id="prof-confirm-pw"
+                  type="password"
+                  autocomplete="new-password"
+                  bind:value={profileConfirmPassword}
+                  placeholder="Repeat new password"
+                  class="w-full rounded-lg border border-white/[0.08] bg-[#0b0b10] px-3 py-2 text-white outline-none focus:border-emerald-500/70"
+                />
+              </div>
+            </div>
+
+            <div class="flex flex-col sm:flex-row sm:items-end gap-3 pt-1">
+              <div class="flex-1">
+                <label for="prof-cur-pw" class="block font-medium text-neutral-400 mb-1">Current Password *</label>
+                <input
+                  id="prof-cur-pw"
+                  type="password"
+                  required
+                  autocomplete="current-password"
+                  bind:value={profileCurrentPassword}
+                  placeholder="Required to confirm changes"
+                  class="w-full rounded-lg border border-white/[0.08] bg-[#0b0b10] px-3 py-2 text-white outline-none focus:border-emerald-500/70"
+                />
+              </div>
+              <button
+                type="submit"
+                disabled={isSavingProfile}
+                class="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-semibold transition disabled:opacity-50 cursor-pointer shrink-0"
+              >
+                {isSavingProfile ? 'Updating...' : 'Update Account'}
+              </button>
+            </div>
+          </form>
 
           <form
             onsubmit={(e) => {

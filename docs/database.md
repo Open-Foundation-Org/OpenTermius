@@ -111,6 +111,7 @@ Every foreign key has an explicit index for query performance and cascade safety
 - `idx_user_invites_invited_by` ON `user_invites(invited_by)`: FK index for admin creator lookup/cascade.
 - `idx_user_invites_email` ON `user_invites(email)`: Lookup pending invites by email.
 - `idx_user_invites_expires_at` ON `user_invites(expires_at)`: Fast filtering of unexpired pending invites.
+- `idx_users_role` ON `users(role)` (Migration `000003_user_role`): Persistent `role` (`admin` / `user`) on `users` so admin email can be updated safely without losing privileges.
 
 ---
 

@@ -13,6 +13,7 @@ type AuthService interface {
 	Refresh(ctx context.Context, refreshToken string) (*domain.User, string, string, error)
 	ValidateToken(ctx context.Context, tokenString string) (uuid.UUID, error)
 	GetProfile(ctx context.Context, userID uuid.UUID) (*domain.User, error)
+	UpdateProfile(ctx context.Context, userID uuid.UUID, currentPassword, name, email, newPassword string) (*domain.User, error)
 	ListUsers(ctx context.Context) ([]domain.User, error)
 	DeleteUser(ctx context.Context, userID uuid.UUID) error
 }

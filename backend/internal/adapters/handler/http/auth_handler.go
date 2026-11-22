@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 
+	"github.com/google/uuid"
 	"github.com/opentermius/opentermius/internal/domain"
 	"github.com/opentermius/opentermius/internal/ports"
 )
@@ -110,6 +111,47 @@ func (h *AuthHandler) Me(w http.ResponseWriter, r *http.Request) {
 	user, err := h.authService.GetProfile(r.Context(), uid)
 	if err != nil {
 		writeJSONError(w, http.StatusNotFound, "user profile not found")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, user)
+}
+
+type updateMeRequest struct {
+	CurrentPassword string `json:"current_password"`
+	Name            string `json:"name"`
+	Email           string `json:"email"`
+	NewPassword     string `json:"new_password"`
+}
+
+func (h *AuthHandler) UpdateMe(w http.ResponseWriter, r *http.Request) {
+	uid := getUserID(r)
+	if uid == uuid.Nil {
+		writeJSONError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
+	var req updateMeRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSONError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	user, err := h.authService.UpdateProfile(r.Context(), uid, req.CurrentPassword, req.Name, req.Email, req.NewPassword)
+	if err != nil {
+		if errors.Is(err, domain.ErrUnauthorized) {
+			writeJSONError(w, http.StatusUnauthorized, "current password is incorrect")
+			return
+		}
+		if errors.Is(err, domain.ErrConflict) {
+			writeJSONError(w, http.StatusConflict, "email is already used by another account")
+			return
+		}
+		if errors.Is(err, domain.ErrInvalidInput) {
+			writeJSONError(w, http.StatusBadRequest, "new password must be at least 8 characters")
+			return
+		}
+		writeJSONError(w, http.StatusInternalServerError, "failed to update profile")
 		return
 	}
 

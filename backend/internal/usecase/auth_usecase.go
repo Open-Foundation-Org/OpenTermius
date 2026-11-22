@@ -3,6 +3,7 @@ package usecase
 import (
 	"context"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -156,6 +157,65 @@ func (a *AuthUseCase) parseToken(tokenString string) (uuid.UUID, string, error) 
 
 func (a *AuthUseCase) GetProfile(ctx context.Context, userID uuid.UUID) (*domain.User, error) {
 	return a.userRepo.GetByID(ctx, userID)
+}
+
+func (a *AuthUseCase) UpdateProfile(ctx context.Context, userID uuid.UUID, currentPassword, name, email, newPassword string) (*domain.User, error) {
+	user, err := a.userRepo.GetByID(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+
+	if currentPassword == "" || bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(currentPassword)) != nil {
+		return nil, domain.ErrUnauthorized
+	}
+
+	name = strings.TrimSpace(name)
+	email = strings.ToLower(strings.TrimSpace(email))
+
+	if name != "" {
+		user.Name = name
+	}
+
+	if email != "" && !strings.EqualFold(email, user.Email) {
+		if existing, err := a.userRepo.GetByEmail(ctx, email); err == nil && existing != nil && existing.ID != user.ID {
+			return nil, domain.ErrConflict
+		}
+		user.Email = email
+	}
+
+	if newPassword != "" {
+		if len(newPassword) < 8 {
+			return nil, domain.ErrInvalidInput
+		}
+		hash, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)
+		if err != nil {
+			return nil, err
+		}
+		user.PasswordHash = string(hash)
+	}
+
+	if user.Role == "" {
+		user.Role = "user"
+	}
+	user.UpdatedAt = time.Now().UTC()
+
+	if err := a.userRepo.Update(ctx, user); err != nil {
+		return nil, err
+	}
+	return user, nil
+}
+
+func (a *AuthUseCase) EnsureAdminRole(ctx context.Context, email string) error {
+	user, err := a.userRepo.GetByEmail(ctx, strings.TrimSpace(email))
+	if err != nil || user == nil {
+		return err
+	}
+	if user.Role == "admin" {
+		return nil
+	}
+	user.Role = "admin"
+	user.UpdatedAt = time.Now().UTC()
+	return a.userRepo.Update(ctx, user)
 }
 
 func (a *AuthUseCase) ListUsers(ctx context.Context) ([]domain.User, error) {

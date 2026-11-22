@@ -4,6 +4,7 @@ export interface GatewayUser {
   id: string;
   email: string;
   name: string;
+  role?: string;
   created_at: string;
 }
 
@@ -257,6 +258,18 @@ class GatewayApiClient {
 
   async getMe(): Promise<GatewayUser> {
     return this.request<GatewayUser>('/auth/me');
+  }
+
+  async updateMe(payload: {
+    current_password: string;
+    name?: string;
+    email?: string;
+    new_password?: string;
+  }): Promise<GatewayUser> {
+    return this.request<GatewayUser>('/auth/me', {
+      method: 'PUT',
+      body: JSON.stringify(payload)
+    });
   }
 
   async getUsers(): Promise<GatewayUser[]> {

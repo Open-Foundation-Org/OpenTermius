@@ -74,6 +74,7 @@ func main() {
 		if _, _, _, err := authUC.Register(ctx, adminEmail, adminPass, adminName); err == nil {
 			log.Printf("Seeded default Gateway Admin user: %s", adminEmail)
 		}
+		_ = authUC.EnsureAdminRole(ctx, adminEmail)
 	}
 
 	// 4. Initialize Handlers

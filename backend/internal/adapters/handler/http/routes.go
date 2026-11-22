@@ -142,6 +142,7 @@ func (r *Router) registerRoutes() {
 
 	// Protected Profile & Admin-Only User Management (Gateway Admin Console)
 	r.mux.Handle("GET /api/v1/auth/me", r.authMiddleware(http.HandlerFunc(r.authHandler.Me)))
+	r.mux.Handle("PUT /api/v1/auth/me", r.authMiddleware(http.HandlerFunc(r.authHandler.UpdateMe)))
 	r.mux.Handle("GET /api/v1/users", r.adminMiddleware(http.HandlerFunc(r.authHandler.ListUsers)))
 	r.mux.Handle("POST /api/v1/users", r.adminMiddleware(http.HandlerFunc(r.authHandler.CreateUser)))
 	r.mux.Handle("DELETE /api/v1/users/{id}", r.adminMiddleware(http.HandlerFunc(r.authHandler.DeleteUser)))
@@ -254,7 +255,9 @@ func (r *Router) adminMiddleware(next http.Handler) http.Handler {
 			return
 		}
 		user, err := r.authService.GetProfile(req.Context(), uid)
-		if err != nil || user == nil || !strings.EqualFold(strings.TrimSpace(user.Email), r.adminEmail) {
+		isAdmin := err == nil && user != nil &&
+			(strings.EqualFold(user.Role, "admin") || strings.EqualFold(strings.TrimSpace(user.Email), r.adminEmail))
+		if !isAdmin {
 			writeJSONError(w, http.StatusForbidden, "gateway admin privileges required")
 			return
 		}
