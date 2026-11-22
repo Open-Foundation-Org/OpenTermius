@@ -29,7 +29,15 @@ This document serves as the single source of truth for all OpenTermius Gateway R
 | `PUT` | `/api/v1/vaults/:id/items/:itemId/move` | Move item to another vault | Yes |
 | `DELETE`| `/api/v1/vaults/:id/items/:itemId` | Delete item from vault | Yes |
 | `GET` | `/api/v1/vaults/:id/members` | List members of a team vault | Yes |
-| `POST` | `/api/v1/vaults/:id/members` | Invite a teammate to vault by email | Yes |
+| `POST` | `/api/v1/vaults/:id/members` | Invite a teammate to vault by email (sends SMTP notification if enabled) | Yes |
+| `GET` | `/api/v1/settings/smtp` | Read Gateway SMTP settings (password masked) | Admin |
+| `PUT` | `/api/v1/settings/smtp` | Save Gateway SMTP settings in PostgreSQL (password encrypted at rest) | Admin |
+| `POST` | `/api/v1/settings/smtp/test` | Send a test email using saved SMTP settings | Admin |
+| `GET` | `/api/v1/invites` | List pending (unused, unexpired) email user invites | Admin |
+| `POST` | `/api/v1/invites` | Create one-time user invite link & send via SMTP | Admin |
+| `DELETE` | `/api/v1/invites/:id` | Revoke a pending user invite | Admin |
+| `GET` | `/api/v1/invites/verify` | Verify one-time invite token (`?token=...`) before password setup | No (rate-limited) |
+| `POST` | `/api/v1/invites/accept` | Accept invite & set user's own password | No (rate-limited) |
 
 ---
 

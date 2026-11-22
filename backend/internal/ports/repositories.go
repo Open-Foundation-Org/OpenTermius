@@ -39,3 +39,16 @@ type SessionLogRepository interface {
 	ListByVault(ctx context.Context, vaultID uuid.UUID) ([]domain.SessionLog, error)
 	GetByID(ctx context.Context, id uuid.UUID) (*domain.SessionLog, error)
 }
+
+type SMTPRepository interface {
+	Get(ctx context.Context) (*domain.SMTPSettings, error)
+	Upsert(ctx context.Context, cfg *domain.SMTPSettings) error
+}
+
+type InviteRepository interface {
+	Create(ctx context.Context, inv *domain.UserInvite) error
+	GetByTokenHash(ctx context.Context, tokenHash string) (*domain.UserInvite, error)
+	MarkUsed(ctx context.Context, id uuid.UUID) error
+	ListPending(ctx context.Context) ([]domain.UserInvite, error)
+	Delete(ctx context.Context, id uuid.UUID) error
+}

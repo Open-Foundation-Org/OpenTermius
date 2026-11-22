@@ -12,6 +12,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	httpAdapter "github.com/opentermius/opentermius/internal/adapters/handler/http"
+	"github.com/opentermius/opentermius/internal/adapters/mail"
 	"github.com/opentermius/opentermius/internal/adapters/repository/postgres"
 	"github.com/opentermius/opentermius/internal/usecase"
 )
@@ -53,13 +54,17 @@ func main() {
 	}
 
 	// 2. Initialize Repositories (Outbound Adapters)
+	appSecret := getEnv("APP_SECRET", jwtSecret)
 	userRepo := postgres.NewUserRepository(pool)
 	vaultRepo := postgres.NewVaultRepository(pool)
+	smtpRepo := postgres.NewSMTPRepository(pool, appSecret)
+	inviteRepo := postgres.NewInviteRepository(pool)
 
 	// 3. Initialize UseCases (Application Business Rules)
 	authUC := usecase.NewAuthUseCase(userRepo, jwtSecret, 24*time.Hour, 90*24*time.Hour)
 	vaultUC := usecase.NewVaultUseCase(vaultRepo, userRepo)
 	presenceUC := usecase.NewPresenceUseCase(vaultRepo, userRepo)
+	smtpUC := usecase.NewSMTPUseCase(smtpRepo, inviteRepo, userRepo, authUC, mail.NewSMTPMailer())
 
 	// 3b. Ensure Default Gateway Admin Account Exists
 	if pool != nil {
@@ -74,10 +79,16 @@ func main() {
 	// 4. Initialize Handlers
 	authHandler := httpAdapter.NewAuthHandler(authUC)
 	vaultHandler := httpAdapter.NewVaultHandler(vaultUC)
+	vaultHandler.SetEmailNotifier(func(toEmail, subject, body string) {
+		notifyCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		_ = smtpUC.SendNotification(notifyCtx, toEmail, subject, body)
+	})
 	collabHandler := httpAdapter.NewCollabHandler(presenceUC, authUC)
+	smtpHandler := httpAdapter.NewSMTPHandler(smtpUC)
 
 	// 5. Initialize Router
-	router := httpAdapter.NewRouter(authUC, authHandler, vaultHandler, collabHandler)
+	router := httpAdapter.NewRouter(authUC, authHandler, vaultHandler, collabHandler, smtpHandler)
 
 	server := &http.Server{
 		Addr:         ":" + port,

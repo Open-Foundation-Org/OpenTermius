@@ -5,7 +5,9 @@
     type GatewayUser,
     type GatewayVault,
     type GatewayMember,
-    type GatewayPresence
+    type GatewayPresence,
+    type GatewaySMTPSettings,
+    type GatewayUserInvite
   } from './lib/api/gateway_client';
   import {
     Server,
@@ -22,7 +24,11 @@
     FolderPlus,
     Menu,
     X,
-    Search
+    Search,
+    Mail,
+    Send,
+    Copy,
+    Check
   } from '@lucide/svelte';
 
   type TabId = 'overview' | 'users' | 'teams' | 'settings';
@@ -71,6 +77,46 @@
   let isInviting = $state(false);
   let inviteError = $state<string | null>(null);
 
+  // Email User Invite (Admin sends invite link so user creates their own password)
+  let pendingInvites = $state<GatewayUserInvite[]>([]);
+  let isEmailInviteOpen = $state(false);
+  let emailInviteName = $state('');
+  let emailInviteAddr = $state('');
+  let isSendingInvite = $state(false);
+  let emailInviteError = $state<string | null>(null);
+  let lastInviteLink = $state<string | null>(null);
+  let copiedInviteLink = $state(false);
+
+  // SMTP Settings (stored in PostgreSQL)
+  let smtpConfig = $state<GatewaySMTPSettings>({
+    enabled: false,
+    host: '',
+    port: 587,
+    username: '',
+    password: '',
+    has_password: false,
+    from_name: 'OpenTermius Gateway',
+    from_email: '',
+    use_tls: true,
+    web_base_url: typeof window !== 'undefined' ? window.location.origin : ''
+  });
+  let isSavingSmtp = $state(false);
+  let smtpError = $state<string | null>(null);
+  let testEmailTo = $state('');
+  let isTestingSmtp = $state(false);
+
+  // Public Invite Acceptance (?invite=<token>)
+  let inviteToken = $state<string | null>(
+    typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('invite') : null
+  );
+  let inviteVerifyState = $state<'loading' | 'ready' | 'done' | 'invalid'>('loading');
+  let inviteInfo = $state<{ email: string; name: string; expires_at: string } | null>(null);
+  let inviteVerifyError = $state<string | null>(null);
+  let acceptPassword = $state('');
+  let acceptPasswordConfirm = $state('');
+  let isAcceptingInvite = $state(false);
+  let acceptError = $state<string | null>(null);
+
   let teamVaults = $derived(vaults.filter((v) => v.type === 'team'));
   let onlineDevices = $derived(presenceList.filter((p) => p.online));
   let activeSshCount = $derived(
@@ -110,6 +156,7 @@
       isCreateUserOpen = false;
       isCreateVaultOpen = false;
       isInviteOpen = false;
+      isEmailInviteOpen = false;
       isMobileOpen = false;
     }
   }
@@ -146,15 +193,25 @@
     errorMessage = null;
 
     try {
-      const [loadedUsers, loadedVaults, loadedPresence] = await Promise.all([
+      const [loadedUsers, loadedVaults, loadedPresence, loadedInvites, loadedSmtp] = await Promise.all([
         gatewayApi.getUsers().catch(() => [] as GatewayUser[]),
         gatewayApi.getVaults(),
-        gatewayApi.getPresence().catch(() => [] as GatewayPresence[])
+        gatewayApi.getPresence().catch(() => [] as GatewayPresence[]),
+        gatewayApi.listInvites().catch(() => [] as GatewayUserInvite[]),
+        gatewayApi.getSMTPSettings().catch(() => null)
       ]);
 
       users = loadedUsers;
       vaults = loadedVaults;
       presenceList = loadedPresence;
+      pendingInvites = loadedInvites;
+      if (loadedSmtp) {
+        smtpConfig = {
+          ...loadedSmtp,
+          password: '',
+          web_base_url: loadedSmtp.web_base_url || (typeof window !== 'undefined' ? window.location.origin : '')
+        };
+      }
 
       const tVaults = loadedVaults.filter((v) => v.type === 'team');
       if (tVaults.length > 0) {
@@ -306,6 +363,118 @@
     }
   }
 
+  async function handleSendEmailInvite(e?: SubmitEvent) {
+    e?.preventDefault();
+    if (!emailInviteName.trim() || !emailInviteAddr.trim()) {
+      emailInviteError = 'Name and email are required.';
+      return;
+    }
+    isSendingInvite = true;
+    emailInviteError = null;
+    lastInviteLink = null;
+    try {
+      const res = await gatewayApi.createInvite(emailInviteName.trim(), emailInviteAddr.trim());
+      pendingInvites = [res.invite, ...pendingInvites];
+      lastInviteLink = res.invite_url;
+      emailInviteName = '';
+      emailInviteAddr = '';
+      if (res.email_sent) {
+        showBanner(`Invite email sent to ${res.invite.email}.`);
+      } else if (res.email_error) {
+        emailInviteError = `Invite created, but email failed: ${res.email_error}. Copy the invite link below instead.`;
+      } else {
+        showBanner(`Invite created for ${res.invite.email}. Enable SMTP in Settings or copy the link.`);
+      }
+    } catch (err: unknown) {
+      emailInviteError = err instanceof Error ? err.message : 'Failed to create invite';
+    } finally {
+      isSendingInvite = false;
+    }
+  }
+
+  async function handleRevokeInvite(inv: GatewayUserInvite) {
+    if (!confirm(`Revoke invite for ${inv.email}?`)) return;
+    try {
+      await gatewayApi.deleteInvite(inv.id);
+      pendingInvites = pendingInvites.filter((i) => i.id !== inv.id);
+      showBanner(`Revoked invite for ${inv.email}.`);
+    } catch (err: unknown) {
+      errorMessage = err instanceof Error ? err.message : 'Failed to revoke invite';
+    }
+  }
+
+  async function handleSaveSmtp(e?: SubmitEvent) {
+    e?.preventDefault();
+    isSavingSmtp = true;
+    smtpError = null;
+    try {
+      const saved = await gatewayApi.updateSMTPSettings({
+        ...smtpConfig,
+        port: Number(smtpConfig.port) || 587
+      });
+      smtpConfig = { ...saved, password: '' };
+      showBanner('SMTP settings saved to database.');
+    } catch (err: unknown) {
+      smtpError = err instanceof Error ? err.message : 'Failed to save SMTP settings';
+    } finally {
+      isSavingSmtp = false;
+    }
+  }
+
+  async function handleTestSmtp(e?: SubmitEvent) {
+    e?.preventDefault();
+    const target = testEmailTo.trim() || currentUser?.email || '';
+    if (!target) {
+      smtpError = 'Enter a recipient email to send a test.';
+      return;
+    }
+    isTestingSmtp = true;
+    smtpError = null;
+    try {
+      await gatewayApi.sendTestEmail(target);
+      showBanner(`Test email sent to ${target}.`);
+    } catch (err: unknown) {
+      smtpError = err instanceof Error ? err.message : 'SMTP test failed';
+    } finally {
+      isTestingSmtp = false;
+    }
+  }
+
+  async function handleAcceptInvite(e?: SubmitEvent) {
+    e?.preventDefault();
+    if (!inviteToken) return;
+    if (acceptPassword.length < 8) {
+      acceptError = 'Password must be at least 8 characters.';
+      return;
+    }
+    if (acceptPassword !== acceptPasswordConfirm) {
+      acceptError = 'Passwords do not match.';
+      return;
+    }
+    isAcceptingInvite = true;
+    acceptError = null;
+    try {
+      await gatewayApi.acceptInvite(inviteToken, acceptPassword);
+      inviteVerifyState = 'done';
+      acceptPassword = '';
+      acceptPasswordConfirm = '';
+    } catch (err: unknown) {
+      acceptError = err instanceof Error ? err.message : 'Failed to activate account';
+    } finally {
+      isAcceptingInvite = false;
+    }
+  }
+
+  async function copyInviteUrl(url: string) {
+    try {
+      await navigator.clipboard.writeText(url);
+      copiedInviteLink = true;
+      setTimeout(() => (copiedInviteLink = false), 2000);
+    } catch {
+      // ignore
+    }
+  }
+
   function handleLogout() {
     gatewayApi.clearToken();
     isAuthenticated = false;
@@ -314,9 +483,25 @@
     vaults = [];
     teamMembers = [];
     presenceList = [];
+    pendingInvites = [];
   }
 
   onMount(() => {
+    if (inviteToken) {
+      inviteVerifyState = 'loading';
+      gatewayApi
+        .verifyInvite(inviteToken)
+        .then((info) => {
+          inviteInfo = info;
+          inviteVerifyState = 'ready';
+        })
+        .catch((err: unknown) => {
+          inviteVerifyError = err instanceof Error ? err.message : 'Invite link is invalid or expired.';
+          inviteVerifyState = 'invalid';
+        });
+      return;
+    }
+
     checkAuthAndLoad();
     const timer = setInterval(() => {
       if (isAuthenticated && activeTab === 'overview' && !document.hidden) {
@@ -329,6 +514,85 @@
 
 <svelte:window onkeydown={handleWindowKeydown} />
 
+{#if inviteToken}
+  <!-- Public User Invite Password Setup Screen (?invite=<token>) -->
+  <div class="flex min-h-screen w-screen items-center justify-center bg-[#0a0a0c] p-4 text-neutral-100 font-sans">
+    <div class="w-full max-w-sm rounded-2xl border border-white/[0.08] bg-[#121218] p-6 shadow-2xl space-y-4 text-xs">
+      <div class="text-center space-y-1">
+        <div class="flex h-10 w-10 items-center justify-center rounded-xl bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 mx-auto mb-2.5">
+          <Mail class="h-5 w-5" />
+        </div>
+        <h1 class="text-base font-semibold text-white">Activate OpenTermius Account</h1>
+        <p class="text-neutral-400">Set your own password to finish joining this Gateway</p>
+      </div>
+
+      {#if inviteVerifyState === 'loading'}
+        <p class="py-6 text-center text-neutral-400">Verifying invite link...</p>
+      {:else if inviteVerifyState === 'invalid'}
+        <div class="rounded-lg bg-rose-950/40 border border-rose-500/30 p-3 text-rose-300 text-center space-y-2">
+          <p>{inviteVerifyError || 'This invite link is invalid or has expired.'}</p>
+          <p class="text-[11px] text-neutral-400">Ask your Gateway admin to send a new invite.</p>
+        </div>
+      {:else if inviteVerifyState === 'done'}
+        <div class="rounded-xl bg-emerald-950/30 border border-emerald-500/30 p-4 text-center space-y-2">
+          <CheckCircle2 class="h-7 w-7 text-emerald-400 mx-auto" />
+          <p class="text-sm font-semibold text-white">Account Activated!</p>
+          <p class="text-neutral-300 leading-relaxed">
+            You can now sign in from the <strong>OpenTermius</strong> Desktop or Mobile app using
+            <span class="font-mono text-emerald-300">{inviteInfo?.email}</span>.
+          </p>
+        </div>
+      {:else if inviteInfo}
+        <div class="rounded-lg border border-white/[0.07] bg-[#0b0b10] px-3 py-2.5 space-y-0.5">
+          <p class="font-medium text-white">{inviteInfo.name}</p>
+          <p class="font-mono text-[11px] text-emerald-400">{inviteInfo.email}</p>
+        </div>
+
+        {#if acceptError}
+          <div class="rounded-lg bg-rose-950/40 border border-rose-500/30 p-2.5 text-rose-300 text-[11px]">
+            {acceptError}
+          </div>
+        {/if}
+
+        <form onsubmit={handleAcceptInvite} class="space-y-3">
+          <div>
+            <label for="acc-pw" class="block font-medium text-neutral-400 mb-1">Create Password</label>
+            <input
+              id="acc-pw"
+              type="password"
+              required
+              minlength="8"
+              autocomplete="new-password"
+              bind:value={acceptPassword}
+              placeholder="Minimum 8 characters"
+              class="w-full rounded-lg border border-white/[0.08] bg-[#0b0b10] px-3 py-2 text-white outline-none focus:border-emerald-500/70"
+            />
+          </div>
+          <div>
+            <label for="acc-pw2" class="block font-medium text-neutral-400 mb-1">Confirm Password</label>
+            <input
+              id="acc-pw2"
+              type="password"
+              required
+              minlength="8"
+              autocomplete="new-password"
+              bind:value={acceptPasswordConfirm}
+              placeholder="Repeat password"
+              class="w-full rounded-lg border border-white/[0.08] bg-[#0b0b10] px-3 py-2 text-white outline-none focus:border-emerald-500/70"
+            />
+          </div>
+          <button
+            type="submit"
+            disabled={isAcceptingInvite}
+            class="w-full rounded-lg bg-emerald-600 py-2.5 font-semibold text-white hover:bg-emerald-500 transition disabled:opacity-50 cursor-pointer"
+          >
+            {isAcceptingInvite ? 'Activating...' : 'Set Password & Activate'}
+          </button>
+        </form>
+      {/if}
+    </div>
+  </div>
+{:else}
 <div class="flex h-screen w-screen overflow-hidden bg-[#0a0a0c] text-neutral-100 font-sans">
   {#if isMobileOpen}
     <div
@@ -669,18 +933,31 @@
           <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
             <div>
               <h2 class="text-base font-semibold text-white tracking-tight">Users</h2>
-              <p class="text-xs text-neutral-400 mt-0.5">Accounts allowed to sign in from Desktop &amp; Mobile apps.</p>
+              <p class="text-xs text-neutral-400 mt-0.5">Invite users via email so they create their own password, or add manually.</p>
             </div>
-            <button
-              type="button"
-              onclick={() => {
-                createUserError = null;
-                isCreateUserOpen = true;
-              }}
-              class="inline-flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs transition cursor-pointer"
-            >
-              <UserPlus class="h-3.5 w-3.5" /> Add User
-            </button>
+            <div class="flex items-center gap-2">
+              <button
+                type="button"
+                onclick={() => {
+                  emailInviteError = null;
+                  lastInviteLink = null;
+                  isEmailInviteOpen = true;
+                }}
+                class="inline-flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs transition cursor-pointer"
+              >
+                <Mail class="h-3.5 w-3.5" /> Invite via Email
+              </button>
+              <button
+                type="button"
+                onclick={() => {
+                  createUserError = null;
+                  isCreateUserOpen = true;
+                }}
+                class="inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg border border-white/[0.08] bg-[#14141c] hover:bg-[#1b1b26] text-neutral-200 font-medium text-xs transition cursor-pointer"
+              >
+                <UserPlus class="h-3.5 w-3.5" /> Add Manually
+              </button>
+            </div>
           </div>
 
           <div class="relative max-w-xs">
@@ -743,6 +1020,42 @@
               </tbody>
             </table>
           </div>
+
+          {#if pendingInvites.length > 0}
+            <div class="space-y-2 pt-2">
+              <h3 class="text-xs font-semibold text-neutral-300">Pending Invites ({pendingInvites.length})</h3>
+              <div class="rounded-xl border border-white/[0.06] bg-[#121217] overflow-x-auto text-xs">
+                <table class="w-full text-left min-w-[480px]">
+                  <thead class="bg-white/[0.02] text-neutral-400 border-b border-white/[0.06] text-[11px]">
+                    <tr>
+                      <th class="px-4 py-2 font-medium">Name</th>
+                      <th class="px-4 py-2 font-medium">Email</th>
+                      <th class="px-4 py-2 font-medium">Expires</th>
+                      <th class="px-4 py-2 font-medium text-right">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody class="divide-y divide-white/[0.05]">
+                    {#each pendingInvites as inv (inv.id)}
+                      <tr class="hover:bg-white/[0.02] transition">
+                        <td class="px-4 py-2 font-medium text-white">{inv.name}</td>
+                        <td class="px-4 py-2 font-mono text-amber-300">{inv.email}</td>
+                        <td class="px-4 py-2 text-neutral-400">{new Date(inv.expires_at).toLocaleString()}</td>
+                        <td class="px-4 py-2 text-right">
+                          <button
+                            type="button"
+                            onclick={() => handleRevokeInvite(inv)}
+                            class="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] text-neutral-400 hover:text-rose-400 hover:bg-rose-500/10 transition cursor-pointer"
+                          >
+                            <Trash2 class="h-3.5 w-3.5" /> Revoke
+                          </button>
+                        </td>
+                      </tr>
+                    {/each}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          {/if}
         </div>
       {:else if activeTab === 'teams'}
         <div class="space-y-4 max-w-5xl">
@@ -833,10 +1146,10 @@
           </div>
         </div>
       {:else if activeTab === 'settings'}
-        <div class="space-y-4 max-w-xl text-xs">
+        <div class="space-y-5 max-w-2xl text-xs">
           <div>
             <h2 class="text-base font-semibold text-white tracking-tight">Settings</h2>
-            <p class="text-xs text-neutral-400 mt-0.5">Gateway REST API connection endpoint.</p>
+            <p class="text-xs text-neutral-400 mt-0.5">Gateway API connection and SMTP email delivery for invites &amp; notifications.</p>
           </div>
 
           <form
@@ -848,8 +1161,9 @@
             }}
             class="rounded-xl border border-white/[0.06] bg-[#121217] p-4 space-y-3"
           >
+            <h3 class="text-xs font-semibold text-white">Gateway REST API</h3>
             <div>
-              <label for="set-api" class="block font-medium text-neutral-300 mb-1">API Base URL</label>
+              <label for="set-api" class="block font-medium text-neutral-400 mb-1">API Base URL</label>
               <input
                 id="set-api"
                 type="url"
@@ -861,7 +1175,162 @@
               type="submit"
               class="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-semibold transition cursor-pointer"
             >
-              Save
+              Save Endpoint
+            </button>
+          </form>
+
+          <!-- SMTP Configuration (Stored in PostgreSQL) -->
+          <form
+            onsubmit={handleSaveSmtp}
+            class="rounded-xl border border-white/[0.06] bg-[#121217] p-4 space-y-4"
+          >
+            <div class="flex items-center justify-between gap-3">
+              <div>
+                <h3 class="text-xs font-semibold text-white flex items-center gap-1.5">
+                  <Mail class="h-3.5 w-3.5 text-emerald-400" /> SMTP Email Configuration
+                </h3>
+                <p class="text-[11px] text-neutral-400 mt-0.5">Used for team invite links (self-service password setup) and vault notifications.</p>
+              </div>
+              <label class="inline-flex items-center gap-2 cursor-pointer shrink-0">
+                <input
+                  type="checkbox"
+                  bind:checked={smtpConfig.enabled}
+                  class="h-4 w-4 accent-emerald-500 rounded cursor-pointer"
+                />
+                <span class="text-xs font-medium {smtpConfig.enabled ? 'text-emerald-400' : 'text-neutral-400'}">
+                  {smtpConfig.enabled ? 'Enabled' : 'Disabled'}
+                </span>
+              </label>
+            </div>
+
+            {#if smtpError}
+              <div class="rounded-lg bg-rose-950/40 border border-rose-500/30 p-2.5 text-rose-300 text-[11px]">
+                {smtpError}
+              </div>
+            {/if}
+
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div class="sm:col-span-2">
+                <label for="smtp-host" class="block font-medium text-neutral-400 mb-1">SMTP Host</label>
+                <input
+                  id="smtp-host"
+                  type="text"
+                  bind:value={smtpConfig.host}
+                  placeholder="smtp.gmail.com"
+                  class="w-full rounded-lg border border-white/[0.08] bg-[#0b0b10] px-3 py-2 text-white font-mono outline-none focus:border-emerald-500/70"
+                />
+              </div>
+              <div>
+                <label for="smtp-port" class="block font-medium text-neutral-400 mb-1">Port</label>
+                <input
+                  id="smtp-port"
+                  type="number"
+                  bind:value={smtpConfig.port}
+                  placeholder="587"
+                  class="w-full rounded-lg border border-white/[0.08] bg-[#0b0b10] px-3 py-2 text-white font-mono outline-none focus:border-emerald-500/70"
+                />
+              </div>
+            </div>
+
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label for="smtp-user" class="block font-medium text-neutral-400 mb-1">SMTP Username</label>
+                <input
+                  id="smtp-user"
+                  type="text"
+                  bind:value={smtpConfig.username}
+                  placeholder="noreply@yourdomain.com"
+                  class="w-full rounded-lg border border-white/[0.08] bg-[#0b0b10] px-3 py-2 text-white outline-none focus:border-emerald-500/70"
+                />
+              </div>
+              <div>
+                <label for="smtp-pass" class="block font-medium text-neutral-400 mb-1">SMTP Password / App Password</label>
+                <input
+                  id="smtp-pass"
+                  type="password"
+                  bind:value={smtpConfig.password}
+                  placeholder={smtpConfig.has_password ? 'Saved — leave blank to keep' : 'Enter SMTP password'}
+                  class="w-full rounded-lg border border-white/[0.08] bg-[#0b0b10] px-3 py-2 text-white outline-none focus:border-emerald-500/70"
+                />
+              </div>
+            </div>
+
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label for="smtp-from-name" class="block font-medium text-neutral-400 mb-1">From Name</label>
+                <input
+                  id="smtp-from-name"
+                  type="text"
+                  bind:value={smtpConfig.from_name}
+                  placeholder="OpenTermius Gateway"
+                  class="w-full rounded-lg border border-white/[0.08] bg-[#0b0b10] px-3 py-2 text-white outline-none focus:border-emerald-500/70"
+                />
+              </div>
+              <div>
+                <label for="smtp-from-email" class="block font-medium text-neutral-400 mb-1">From Email</label>
+                <input
+                  id="smtp-from-email"
+                  type="email"
+                  bind:value={smtpConfig.from_email}
+                  placeholder="noreply@yourdomain.com"
+                  class="w-full rounded-lg border border-white/[0.08] bg-[#0b0b10] px-3 py-2 text-white outline-none focus:border-emerald-500/70"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label for="smtp-web-url" class="block font-medium text-neutral-400 mb-1">Gateway Web URL (for Invite Links)</label>
+              <input
+                id="smtp-web-url"
+                type="url"
+                bind:value={smtpConfig.web_base_url}
+                placeholder="https://gateway.yourdomain.com"
+                class="w-full rounded-lg border border-white/[0.08] bg-[#0b0b10] px-3 py-2 text-white font-mono outline-none focus:border-emerald-500/70"
+              />
+            </div>
+
+            <div class="flex flex-wrap items-center justify-between gap-3 pt-1">
+              <label class="inline-flex items-center gap-2 text-neutral-300 cursor-pointer">
+                <input
+                  type="checkbox"
+                  bind:checked={smtpConfig.use_tls}
+                  class="h-4 w-4 accent-emerald-500 rounded cursor-pointer"
+                />
+                <span>Use TLS / STARTTLS (recommended)</span>
+              </label>
+
+              <button
+                type="submit"
+                disabled={isSavingSmtp}
+                class="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-semibold transition disabled:opacity-50 cursor-pointer"
+              >
+                {isSavingSmtp ? 'Saving...' : 'Save SMTP Settings'}
+              </button>
+            </div>
+          </form>
+
+          <!-- Test SMTP Email -->
+          <form
+            onsubmit={handleTestSmtp}
+            class="rounded-xl border border-white/[0.06] bg-[#121217] p-4 flex flex-col sm:flex-row sm:items-end gap-3"
+          >
+            <div class="flex-1">
+              <label for="smtp-test-to" class="block font-medium text-neutral-400 mb-1">Send Test Email</label>
+              <input
+                id="smtp-test-to"
+                type="email"
+                bind:value={testEmailTo}
+                placeholder={currentUser?.email || 'you@yourdomain.com'}
+                class="w-full rounded-lg border border-white/[0.08] bg-[#0b0b10] px-3 py-2 text-white outline-none focus:border-emerald-500/70"
+              />
+            </div>
+            <button
+              type="submit"
+              disabled={isTestingSmtp}
+              class="inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-lg border border-white/[0.1] bg-[#181822] hover:bg-[#222230] text-white font-medium transition disabled:opacity-50 cursor-pointer shrink-0"
+            >
+              <Send class="h-3.5 w-3.5 text-emerald-400" />
+              <span>{isTestingSmtp ? 'Sending...' : 'Send Test'}</span>
             </button>
           </form>
         </div>
@@ -1045,4 +1514,87 @@
       </div>
     </form>
   </div>
+{/if}
+
+<!-- Invite User via Email Modal (Self-Service Password Setup) -->
+{#if isEmailInviteOpen}
+  <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-xs p-4" onclick={(e) => { if (e.target === e.currentTarget) isEmailInviteOpen = false; }} role="presentation">
+    <form
+      onsubmit={handleSendEmailInvite}
+      class="w-full max-w-md rounded-2xl border border-white/[0.08] bg-[#13131b] p-5 shadow-2xl space-y-4 text-xs"
+    >
+      <div class="flex items-center justify-between border-b border-white/[0.06] pb-3">
+        <h3 class="text-sm font-semibold text-white">Invite User via Email</h3>
+        <button type="button" onclick={() => (isEmailInviteOpen = false)} class="text-neutral-400 hover:text-white">
+          <X class="h-4 w-4" />
+        </button>
+      </div>
+
+      <p class="text-[11px] text-neutral-400">
+        The invited user receives a one-time link (valid 24 hours) to create their own password.
+      </p>
+
+      {#if emailInviteError}
+        <div class="rounded-lg bg-rose-950/40 border border-rose-500/30 p-2.5 text-rose-300 text-[11px]">
+          {emailInviteError}
+        </div>
+      {/if}
+
+      {#if lastInviteLink}
+        <div class="rounded-lg border border-emerald-500/30 bg-emerald-950/25 p-3 space-y-2">
+          <div class="flex items-center justify-between">
+            <span class="text-[11px] font-medium text-emerald-300">Invite Link Ready</span>
+            <button
+              type="button"
+              onclick={() => copyInviteUrl(lastInviteLink!)}
+              class="inline-flex items-center gap-1 rounded px-2 py-0.5 text-[11px] bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30 cursor-pointer"
+            >
+              {#if copiedInviteLink}
+                <Check class="h-3 w-3" /> Copied
+              {:else}
+                <Copy class="h-3 w-3" /> Copy Link
+              {/if}
+            </button>
+          </div>
+          <p class="font-mono text-[10px] text-neutral-300 break-all">{lastInviteLink}</p>
+        </div>
+      {/if}
+
+      <div class="space-y-3">
+        <div>
+          <label for="ei-name" class="block text-neutral-400 font-medium mb-1">Full Name</label>
+          <input
+            id="ei-name"
+            type="text"
+            required
+            bind:value={emailInviteName}
+            placeholder="Budi Santoso"
+            class="w-full rounded-lg border border-white/[0.08] bg-[#0b0b10] px-3 py-2 text-white outline-none focus:border-emerald-500/70"
+          />
+        </div>
+        <div>
+          <label for="ei-email" class="block text-neutral-400 font-medium mb-1">Email</label>
+          <input
+            id="ei-email"
+            type="email"
+            required
+            bind:value={emailInviteAddr}
+            placeholder="budi@company.com"
+            class="w-full rounded-lg border border-white/[0.08] bg-[#0b0b10] px-3 py-2 text-white outline-none focus:border-emerald-500/70"
+          />
+        </div>
+      </div>
+
+      <div class="flex justify-end gap-2 pt-3 border-t border-white/[0.06]">
+        <button type="button" onclick={() => (isEmailInviteOpen = false)} class="px-3 py-1.5 rounded-lg border border-white/[0.08] text-neutral-400 hover:text-white transition">
+          Close
+        </button>
+        <button type="submit" disabled={isSendingInvite} class="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-semibold transition disabled:opacity-50 cursor-pointer">
+          <Send class="h-3.5 w-3.5" />
+          <span>{isSendingInvite ? 'Sending...' : 'Send Invite'}</span>
+        </button>
+      </div>
+    </form>
+  </div>
+{/if}
 {/if}

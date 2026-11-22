@@ -55,6 +55,37 @@ export interface GatewayPresence {
   active_sessions: GatewayActiveSession[];
 }
 
+export interface GatewaySMTPSettings {
+  enabled: boolean;
+  host: string;
+  port: number;
+  username: string;
+  password?: string;
+  has_password?: boolean;
+  from_name: string;
+  from_email: string;
+  use_tls: boolean;
+  web_base_url: string;
+  updated_at?: string;
+}
+
+export interface GatewayUserInvite {
+  id: string;
+  email: string;
+  name: string;
+  invited_by: string;
+  expires_at: string;
+  used_at?: string;
+  created_at: string;
+}
+
+export interface GatewayInviteResult {
+  invite: GatewayUserInvite;
+  invite_url: string;
+  email_sent: boolean;
+  email_error?: string;
+}
+
 function resolveDefaultApiBase(): string {
   const envBase = (import.meta as any).env?.VITE_API_BASE as string | undefined;
   if (envBase && envBase.trim()) {
@@ -277,6 +308,60 @@ class GatewayApiClient {
 
   async getPresence(): Promise<GatewayPresence[]> {
     return this.request<GatewayPresence[]>('/presence');
+  }
+
+  async getSMTPSettings(): Promise<GatewaySMTPSettings> {
+    return this.request<GatewaySMTPSettings>('/settings/smtp');
+  }
+
+  async updateSMTPSettings(cfg: GatewaySMTPSettings): Promise<GatewaySMTPSettings> {
+    return this.request<GatewaySMTPSettings>('/settings/smtp', {
+      method: 'PUT',
+      body: JSON.stringify(cfg)
+    });
+  }
+
+  async sendTestEmail(toEmail: string): Promise<void> {
+    await this.request<{ status: string }>('/settings/smtp/test', {
+      method: 'POST',
+      body: JSON.stringify({ to_email: toEmail })
+    });
+  }
+
+  async listInvites(): Promise<GatewayUserInvite[]> {
+    return this.request<GatewayUserInvite[]>('/invites');
+  }
+
+  async createInvite(name: string, email: string): Promise<GatewayInviteResult> {
+    return this.request<GatewayInviteResult>('/invites', {
+      method: 'POST',
+      body: JSON.stringify({ name, email })
+    });
+  }
+
+  async deleteInvite(id: string): Promise<void> {
+    await this.request<{ status: string }>(`/invites/${id}`, {
+      method: 'DELETE'
+    });
+  }
+
+  async verifyInvite(token: string): Promise<{ email: string; name: string; expires_at: string }> {
+    return this.request<{ email: string; name: string; expires_at: string }>(
+      `/invites/verify?token=${encodeURIComponent(token)}`,
+      {},
+      true
+    );
+  }
+
+  async acceptInvite(token: string, password: string): Promise<{ user: GatewayUser; token: string }> {
+    return this.request<{ user: GatewayUser; token: string }>(
+      '/invites/accept',
+      {
+        method: 'POST',
+        body: JSON.stringify({ token, password })
+      },
+      true
+    );
   }
 }
 

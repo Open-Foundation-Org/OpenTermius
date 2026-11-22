@@ -12,10 +12,15 @@ import (
 
 type VaultHandler struct {
 	vaultService ports.VaultService
+	notifyEmail  func(toEmail, subject, body string)
 }
 
 func NewVaultHandler(vaultService ports.VaultService) *VaultHandler {
 	return &VaultHandler{vaultService: vaultService}
+}
+
+func (h *VaultHandler) SetEmailNotifier(fn func(toEmail, subject, body string)) {
+	h.notifyEmail = fn
 }
 
 type createVaultRequest struct {
@@ -292,6 +297,23 @@ func (h *VaultHandler) InviteMember(w http.ResponseWriter, r *http.Request) {
 		}
 		writeJSONError(w, http.StatusInternalServerError, "failed to invite member")
 		return
+	}
+
+	if h.notifyEmail != nil {
+		vaultName := "Team Vault"
+		if v, vErr := h.vaultService.GetVault(r.Context(), vaultID, uid); vErr == nil && v != nil && v.Name != "" {
+			vaultName = v.Name
+		}
+		roleLabel := req.Role
+		if roleLabel == "" {
+			roleLabel = "member"
+		}
+		targetEmail := req.Email
+		go h.notifyEmail(
+			targetEmail,
+			"Added to OpenTermius Team Vault: "+vaultName,
+			"Hi,\n\nYou have been added to the shared Team Vault \""+vaultName+"\" with role \""+roleLabel+"\".\n\nOpen the OpenTermius app and switch to this vault to sync shared hosts and keys.\n\n— OpenTermius Gateway\n",
+		)
 	}
 
 	writeJSON(w, http.StatusCreated, member)

@@ -80,3 +80,28 @@ type SessionLog struct {
 	EndedAt      *time.Time `json:"ended_at,omitempty"`
 	RecordedData string     `json:"recorded_data"`
 }
+
+type SMTPSettings struct {
+	Enabled     bool      `json:"enabled"`
+	Host        string    `json:"host"`
+	Port        int       `json:"port"`
+	Username    string    `json:"username"`
+	Password    string    `json:"-"`
+	HasPassword bool      `json:"has_password"`
+	FromName    string    `json:"from_name"`
+	FromEmail   string    `json:"from_email"`
+	UseTLS      bool      `json:"use_tls"`
+	WebBaseURL  string    `json:"web_base_url"`
+	UpdatedAt   time.Time `json:"updated_at"`
+}
+
+type UserInvite struct {
+	ID        uuid.UUID  `json:"id"`
+	Email     string     `json:"email"`
+	Name      string     `json:"name"`
+	TokenHash string     `json:"-"`
+	InvitedBy uuid.UUID  `json:"invited_by"`
+	ExpiresAt time.Time  `json:"expires_at"`
+	UsedAt    *time.Time `json:"used_at,omitempty"`
+	CreatedAt time.Time  `json:"created_at"`
+}

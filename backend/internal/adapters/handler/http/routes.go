@@ -79,6 +79,7 @@ type Router struct {
 	authHandler         *AuthHandler
 	vaultHandler        *VaultHandler
 	collabHandler       *CollabHandler
+	smtpHandler         *SMTPHandler
 	authLimiter         *ipRateLimiter
 	adminEmail          string
 	allowPublicRegister bool
@@ -90,6 +91,7 @@ func NewRouter(
 	authHandler *AuthHandler,
 	vaultHandler *VaultHandler,
 	collabHandler *CollabHandler,
+	smtpHandler *SMTPHandler,
 ) *Router {
 	adminEmail := strings.ToLower(strings.TrimSpace(os.Getenv("DEFAULT_ADMIN_EMAIL")))
 	if adminEmail == "" {
@@ -116,6 +118,7 @@ func NewRouter(
 		authHandler:         authHandler,
 		vaultHandler:        vaultHandler,
 		collabHandler:       collabHandler,
+		smtpHandler:         smtpHandler,
 		authLimiter:         newIPRateLimiter(20, time.Minute),
 		adminEmail:          adminEmail,
 		allowPublicRegister: allowPublic,
@@ -142,6 +145,19 @@ func (r *Router) registerRoutes() {
 	r.mux.Handle("GET /api/v1/users", r.adminMiddleware(http.HandlerFunc(r.authHandler.ListUsers)))
 	r.mux.Handle("POST /api/v1/users", r.adminMiddleware(http.HandlerFunc(r.authHandler.CreateUser)))
 	r.mux.Handle("DELETE /api/v1/users/{id}", r.adminMiddleware(http.HandlerFunc(r.authHandler.DeleteUser)))
+
+	// SMTP Settings & Email Invites
+	if r.smtpHandler != nil {
+		r.mux.Handle("GET /api/v1/settings/smtp", r.adminMiddleware(http.HandlerFunc(r.smtpHandler.GetSettings)))
+		r.mux.Handle("PUT /api/v1/settings/smtp", r.adminMiddleware(http.HandlerFunc(r.smtpHandler.UpdateSettings)))
+		r.mux.Handle("POST /api/v1/settings/smtp/test", r.adminMiddleware(http.HandlerFunc(r.smtpHandler.TestSettings)))
+		r.mux.Handle("GET /api/v1/invites", r.adminMiddleware(http.HandlerFunc(r.smtpHandler.ListInvites)))
+		r.mux.Handle("POST /api/v1/invites", r.adminMiddleware(http.HandlerFunc(r.smtpHandler.CreateInvite)))
+		r.mux.Handle("DELETE /api/v1/invites/{id}", r.adminMiddleware(http.HandlerFunc(r.smtpHandler.DeleteInvite)))
+		// Public invite verification & password setup (rate-limited)
+		r.mux.Handle("GET /api/v1/invites/verify", r.rateLimitAuth(http.HandlerFunc(r.smtpHandler.VerifyInvite)))
+		r.mux.Handle("POST /api/v1/invites/accept", r.rateLimitAuth(http.HandlerFunc(r.smtpHandler.AcceptInvite)))
+	}
 
 	// Protected Vaults
 	r.mux.Handle("GET /api/v1/vaults", r.authMiddleware(http.HandlerFunc(r.vaultHandler.ListVaults)))
