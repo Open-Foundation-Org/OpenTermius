@@ -169,6 +169,25 @@ func (r *InviteRepository) Create(ctx context.Context, inv *domain.UserInvite) e
 	return err
 }
 
+func (r *InviteRepository) GetByID(ctx context.Context, id uuid.UUID) (*domain.UserInvite, error) {
+	const query = `
+		SELECT id, email, name, token_hash, invited_by, expires_at, used_at, created_at
+		FROM user_invites
+		WHERE id = $1
+	`
+	var inv domain.UserInvite
+	err := r.pool.QueryRow(ctx, query, id).Scan(
+		&inv.ID, &inv.Email, &inv.Name, &inv.TokenHash, &inv.InvitedBy, &inv.ExpiresAt, &inv.UsedAt, &inv.CreatedAt,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, domain.ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &inv, nil
+}
+
 func (r *InviteRepository) GetByTokenHash(ctx context.Context, tokenHash string) (*domain.UserInvite, error) {
 	const query = `
 		SELECT id, email, name, token_hash, invited_by, expires_at, used_at, created_at

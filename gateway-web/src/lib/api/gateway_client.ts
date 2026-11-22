@@ -345,6 +345,12 @@ class GatewayApiClient {
     });
   }
 
+  async resendInvite(id: string): Promise<GatewayInviteResult> {
+    return this.request<GatewayInviteResult>(`/invites/${id}/resend`, {
+      method: 'POST'
+    });
+  }
+
   async verifyInvite(token: string): Promise<{ email: string; name: string; expires_at: string }> {
     return this.request<{ email: string; name: string; expires_at: string }>(
       `/invites/verify?token=${encodeURIComponent(token)}`,

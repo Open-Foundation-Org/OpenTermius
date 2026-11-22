@@ -35,6 +35,7 @@ This document serves as the single source of truth for all OpenTermius Gateway R
 | `POST` | `/api/v1/settings/smtp/test` | Send a test email using saved SMTP settings | Admin |
 | `GET` | `/api/v1/invites` | List pending (unused, unexpired) email user invites | Admin |
 | `POST` | `/api/v1/invites` | Create one-time user invite link & send via SMTP | Admin |
+| `POST` | `/api/v1/invites/:id/resend` | Rotate token (fresh 24h expiry) & resend invite email | Admin |
 | `DELETE` | `/api/v1/invites/:id` | Revoke a pending user invite | Admin |
 | `GET` | `/api/v1/invites/verify` | Verify one-time invite token (`?token=...`) before password setup | No (rate-limited) |
 | `POST` | `/api/v1/invites/accept` | Accept invite & set user's own password | No (rate-limited) |

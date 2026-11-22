@@ -169,6 +169,22 @@ func (u *SMTPUseCase) DeleteInvite(ctx context.Context, id uuid.UUID) error {
 	return u.inviteRepo.Delete(ctx, id)
 }
 
+func (u *SMTPUseCase) ResendInvite(ctx context.Context, id, callerID uuid.UUID, fallbackOrigin string) (*InviteResult, error) {
+	existing, err := u.inviteRepo.GetByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if existing.UsedAt != nil {
+		return nil, domain.ErrConflict
+	}
+	res, err := u.CreateInvite(ctx, callerID, existing.Email, existing.Name, fallbackOrigin)
+	if err != nil {
+		return nil, err
+	}
+	_ = u.inviteRepo.Delete(ctx, existing.ID)
+	return res, nil
+}
+
 func (u *SMTPUseCase) VerifyInvite(ctx context.Context, rawToken string) (*domain.UserInvite, error) {
 	rawToken = strings.TrimSpace(rawToken)
 	if rawToken == "" {

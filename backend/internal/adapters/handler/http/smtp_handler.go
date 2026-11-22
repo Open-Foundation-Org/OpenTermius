@@ -139,6 +139,29 @@ func (h *SMTPHandler) DeleteInvite(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "revoked"})
 }
 
+func (h *SMTPHandler) ResendInvite(w http.ResponseWriter, r *http.Request) {
+	callerID := getUserID(r)
+	id, err := parseUUID(r.PathValue("id"))
+	if err != nil {
+		writeJSONError(w, http.StatusBadRequest, "invalid invite id")
+		return
+	}
+	res, err := h.smtpUC.ResendInvite(r.Context(), id, callerID, r.Header.Get("Origin"))
+	if err != nil {
+		if errors.Is(err, domain.ErrNotFound) {
+			writeJSONError(w, http.StatusNotFound, "invite not found")
+			return
+		}
+		if errors.Is(err, domain.ErrConflict) {
+			writeJSONError(w, http.StatusConflict, "user already registered or invite already used")
+			return
+		}
+		writeJSONError(w, http.StatusInternalServerError, "failed to resend invite")
+		return
+	}
+	writeJSON(w, http.StatusOK, res)
+}
+
 func (h *SMTPHandler) VerifyInvite(w http.ResponseWriter, r *http.Request) {
 	token := r.URL.Query().Get("token")
 	inv, err := h.smtpUC.VerifyInvite(r.Context(), token)

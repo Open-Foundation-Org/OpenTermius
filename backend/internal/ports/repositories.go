@@ -47,6 +47,7 @@ type SMTPRepository interface {
 
 type InviteRepository interface {
 	Create(ctx context.Context, inv *domain.UserInvite) error
+	GetByID(ctx context.Context, id uuid.UUID) (*domain.UserInvite, error)
 	GetByTokenHash(ctx context.Context, tokenHash string) (*domain.UserInvite, error)
 	MarkUsed(ctx context.Context, id uuid.UUID) error
 	ListPending(ctx context.Context) ([]domain.UserInvite, error)

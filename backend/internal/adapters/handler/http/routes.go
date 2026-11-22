@@ -153,6 +153,7 @@ func (r *Router) registerRoutes() {
 		r.mux.Handle("POST /api/v1/settings/smtp/test", r.adminMiddleware(http.HandlerFunc(r.smtpHandler.TestSettings)))
 		r.mux.Handle("GET /api/v1/invites", r.adminMiddleware(http.HandlerFunc(r.smtpHandler.ListInvites)))
 		r.mux.Handle("POST /api/v1/invites", r.adminMiddleware(http.HandlerFunc(r.smtpHandler.CreateInvite)))
+		r.mux.Handle("POST /api/v1/invites/{id}/resend", r.adminMiddleware(http.HandlerFunc(r.smtpHandler.ResendInvite)))
 		r.mux.Handle("DELETE /api/v1/invites/{id}", r.adminMiddleware(http.HandlerFunc(r.smtpHandler.DeleteInvite)))
 		// Public invite verification & password setup (rate-limited)
 		r.mux.Handle("GET /api/v1/invites/verify", r.rateLimitAuth(http.HandlerFunc(r.smtpHandler.VerifyInvite)))

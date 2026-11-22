@@ -79,6 +79,7 @@
 
   // Email User Invite (Admin sends invite link so user creates their own password)
   let pendingInvites = $state<GatewayUserInvite[]>([]);
+  let resendingInviteId = $state<string | null>(null);
   let isEmailInviteOpen = $state(false);
   let emailInviteName = $state('');
   let emailInviteAddr = $state('');
@@ -400,6 +401,26 @@
       showBanner(`Revoked invite for ${inv.email}.`);
     } catch (err: unknown) {
       errorMessage = err instanceof Error ? err.message : 'Failed to revoke invite';
+    }
+  }
+
+  async function handleResendInvite(inv: GatewayUserInvite) {
+    resendingInviteId = inv.id;
+    errorMessage = null;
+    try {
+      const res = await gatewayApi.resendInvite(inv.id);
+      pendingInvites = [res.invite, ...pendingInvites.filter((i) => i.id !== inv.id)];
+      if (res.email_sent) {
+        showBanner(`Resent invite email to ${inv.email}.`);
+      } else if (res.email_error) {
+        errorMessage = `New invite link generated, but email failed: ${res.email_error}`;
+      } else {
+        showBanner(`Refreshed invite for ${inv.email}. Enable SMTP in Settings to send emails.`);
+      }
+    } catch (err: unknown) {
+      errorMessage = err instanceof Error ? err.message : 'Failed to resend invite';
+    } finally {
+      resendingInviteId = null;
     }
   }
 
@@ -1041,13 +1062,24 @@
                         <td class="px-4 py-2 font-mono text-amber-300">{inv.email}</td>
                         <td class="px-4 py-2 text-neutral-400">{new Date(inv.expires_at).toLocaleString()}</td>
                         <td class="px-4 py-2 text-right">
-                          <button
-                            type="button"
-                            onclick={() => handleRevokeInvite(inv)}
-                            class="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] text-neutral-400 hover:text-rose-400 hover:bg-rose-500/10 transition cursor-pointer"
-                          >
-                            <Trash2 class="h-3.5 w-3.5" /> Revoke
-                          </button>
+                          <div class="inline-flex items-center gap-1">
+                            <button
+                              type="button"
+                              disabled={resendingInviteId === inv.id}
+                              onclick={() => handleResendInvite(inv)}
+                              class="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] text-emerald-400 hover:bg-emerald-500/10 disabled:opacity-50 transition cursor-pointer"
+                            >
+                              <Send class="h-3.5 w-3.5" />
+                              {resendingInviteId === inv.id ? 'Sending...' : 'Resend'}
+                            </button>
+                            <button
+                              type="button"
+                              onclick={() => handleRevokeInvite(inv)}
+                              class="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] text-neutral-400 hover:text-rose-400 hover:bg-rose-500/10 transition cursor-pointer"
+                            >
+                              <Trash2 class="h-3.5 w-3.5" /> Revoke
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     {/each}
