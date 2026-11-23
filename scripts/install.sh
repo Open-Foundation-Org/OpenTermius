@@ -487,8 +487,10 @@ setup_database_and_env() {
     prompt_input keep_env "Existing .env found at $env_file. Keep it? (Y/n)" "Y"
     if [[ "$keep_env" =~ ^[Yy]$ ]]; then
       ok "Preserving existing $env_file (backfilling any new env keys)"
+      sed -i.bak 's/^DEFAULT_ADMIN_NAME=Gateway Admin$/DEFAULT_ADMIN_NAME="Gateway Admin"/' "$env_file" 2>/dev/null || true
+      rm -f "${env_file}.bak" 2>/dev/null || true
       ensure_env_key "$env_file" "DEFAULT_ADMIN_EMAIL" "admin@opentermius.local"
-      ensure_env_key "$env_file" "DEFAULT_ADMIN_NAME" "Gateway Admin"
+      ensure_env_key "$env_file" "DEFAULT_ADMIN_NAME" "\"Gateway Admin\""
       ensure_env_key "$env_file" "ALLOW_PUBLIC_REGISTER" "false"
       ensure_env_key "$env_file" "ALLOWED_HOSTS" ""
       ensure_env_key "$env_file" "API_PROXY_TARGET" ""
@@ -638,7 +640,7 @@ JWT_SECRET=${jwt_secret}
 # 3. Default Gateway Admin Account (seeded on first startup)
 DEFAULT_ADMIN_EMAIL=${DEFAULT_ADMIN_EMAIL}
 DEFAULT_ADMIN_PASSWORD=${DEFAULT_ADMIN_PASSWORD}
-DEFAULT_ADMIN_NAME=${DEFAULT_ADMIN_NAME}
+DEFAULT_ADMIN_NAME="${DEFAULT_ADMIN_NAME}"
 
 # 4. Registration & Access Policy
 ALLOW_PUBLIC_REGISTER=${ALLOW_PUBLIC_REGISTER}
