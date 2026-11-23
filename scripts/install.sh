@@ -443,6 +443,28 @@ ensure_env_key() {
   fi
 }
 
+load_env_file() {
+  local file="$1" line key val
+  [ -f "$file" ] || return 0
+  while IFS= read -r line || [ -n "$line" ]; do
+    line="${line#"${line%%[![:space:]]*}"}"
+    line="${line%"${line##*[![:space:]]}"}"
+    [ -z "$line" ] || [[ "$line" == \#* ]] && continue
+    if [[ "$line" == *=* ]]; then
+      key="${line%%=*}"
+      val="${line#*=}"
+      key="${key%"${key##*[![:space:]]}"}"
+      val="${val#"${val%%[![:space:]]*}"}"
+      if [[ "$val" =~ ^\".*\"$ ]] || [[ "$val" =~ ^\'.*\'$ ]]; then
+        val="${val:1:${#val}-2}"
+      fi
+      if [[ "$key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; then
+        export "$key=$val"
+      fi
+    fi
+  done < "$file"
+}
+
 port_in_use_by_other() {
   local port="$1" svc="$2"
   if command -v systemctl >/dev/null 2>&1 && systemctl is-active --quiet "$svc" 2>/dev/null; then
@@ -471,8 +493,7 @@ setup_database_and_env() {
       ensure_env_key "$env_file" "ALLOWED_HOSTS" ""
       ensure_env_key "$env_file" "API_PROXY_TARGET" ""
       ensure_env_key "$env_file" "VITE_API_BASE" ""
-      # shellcheck disable=SC1090
-      set -a; source "$env_file"; set +a
+      load_env_file "$env_file"
     fi
   fi
 
@@ -651,7 +672,7 @@ build_components() {
   log "Installing & building Gateway Web UI..."
   (
     if [ -f "$INSTALL_DIR/.env" ]; then
-      set -a; source "$INSTALL_DIR/.env"; set +a
+      load_env_file "$INSTALL_DIR/.env"
     fi
     cd "$INSTALL_DIR/gateway-web"
     export VITE_API_PORT="${VITE_API_PORT:-${SERVER_PORT:-8080}}"
