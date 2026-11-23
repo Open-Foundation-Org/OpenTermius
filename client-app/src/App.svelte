@@ -1018,13 +1018,13 @@
         }
       }
 
-      const res = await fetch('https://api.github.com/repos/wisnu-w/OpenTermius/releases/latest');
+      const res = await fetch('https://api.github.com/repos/Open-Foundation-Org/OpenTermius/releases/latest');
       if (res.ok) {
         const data = await res.json();
         const remoteVer = String(data.tag_name || '').replace(/^v/i, '');
         if (remoteVer && isNewerSemver(remoteVer, APP_VERSION)) {
           const assets: Array<{ name: string; browser_download_url: string }> = Array.isArray(data.assets) ? data.assets : [];
-          let targetAsset = data.html_url || 'https://github.com/wisnu-w/OpenTermius/releases/latest';
+          let targetAsset = data.html_url || 'https://github.com/Open-Foundation-Org/OpenTermius/releases/latest';
           if (platform.isMac) {
             targetAsset = assets.find((a) => a.name.endsWith('.dmg'))?.browser_download_url || targetAsset;
           } else {

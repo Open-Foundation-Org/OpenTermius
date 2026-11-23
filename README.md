@@ -4,18 +4,18 @@
   <p><strong>Open-source, zero-paywall SSH &amp; SFTP client and self-hostable team gateway for macOS, Windows, and Android.</strong></p>
 
   <p>
-    <a href="https://github.com/wisnu-w/OpenTermius/releases/latest">
-      <img src="https://img.shields.io/github/v/release/wisnu-w/OpenTermius?style=for-the-badge&color=10b981" alt="Latest Release" />
+    <a href="https://github.com/Open-Foundation-Org/OpenTermius/releases/latest">
+      <img src="https://img.shields.io/github/v/release/Open-Foundation-Org/OpenTermius?style=for-the-badge&color=10b981" alt="Latest Release" />
     </a>
     <a href="LICENSE">
-      <img src="https://img.shields.io/github/license/wisnu-w/OpenTermius?style=for-the-badge&color=3b82f6" alt="License" />
+      <img src="https://img.shields.io/github/license/Open-Foundation-Org/OpenTermius?style=for-the-badge&color=3b82f6" alt="License" />
     </a>
     <img src="https://img.shields.io/badge/Platforms-macOS%20%7C%20Windows%20%7C%20Android%20%7C%20Linux-18181b?style=for-the-badge" alt="Platforms" />
   </p>
 
   <p>
-    <a href="https://wisnu-w.github.io/OpenTermius/">Website</a> ·
-    <a href="https://github.com/wisnu-w/OpenTermius/releases/latest">Download App</a> ·
+    <a href="https://open-foundation-org.github.io/OpenTermius/">Website</a> ·
+    <a href="https://github.com/Open-Foundation-Org/OpenTermius/releases/latest">Download App</a> ·
     <a href="#self-host-gateway-1-command">Self-Host Gateway</a> ·
     <a href="docs/api.md">API Docs</a>
   </p>
@@ -35,7 +35,7 @@
 
 ## Download Client
 
-Grab the latest installers from **[GitHub Releases](https://github.com/wisnu-w/OpenTermius/releases/latest)**:
+Grab the latest installers from **[GitHub Releases](https://github.com/Open-Foundation-Org/OpenTermius/releases/latest)**:
 
 - **macOS (`aarch64` Apple Silicon):** `OpenTermius_X.Y.Z_aarch64.dmg`
 - **Windows (`x64` NSIS Installer):** `opentermius_X.Y.Z_x64-setup.exe`
@@ -58,13 +58,13 @@ Grab the latest installers from **[GitHub Releases](https://github.com/wisnu-w/O
 Install PostgreSQL 18+, Go 1.26+, Node.js 24 LTS, database migrations, Gateway API, and Gateway Web Admin Portal on **Ubuntu, Debian, Fedora, RHEL/Alma/Rocky, Arch, Alpine, or macOS**:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/wisnu-w/OpenTermius/main/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/Open-Foundation-Org/OpenTermius/main/scripts/install.sh | bash
 ```
 
 - Detects existing PostgreSQL (native, Docker, or cloud like Supabase with `sslmode=require`) and busy ports (`8080`/`5174`) interactively.
 - Pass an external DB directly if preferred:
   ```bash
-  DATABASE_URL="postgres://user:pass@host:5432/opentermius?sslmode=require" curl -fsSL https://raw.githubusercontent.com/wisnu-w/OpenTermius/main/scripts/install.sh | bash
+  DATABASE_URL="postgres://user:pass@host:5432/opentermius?sslmode=require" curl -fsSL https://raw.githubusercontent.com/Open-Foundation-Org/OpenTermius/main/scripts/install.sh | bash
   ```
 - **Default Gateway Admin login:** `admin@opentermius.local` / `OpenTermius2026!` (change after first login).
 - **Client Gateway URL format:** `http://<your-server-ip>:<api-port>/api/v1` (or `https://<your-domain>/api/v1`).
@@ -129,5 +129,5 @@ cd client-app && ./scripts/build-apk.sh release
 
 ## Privacy Policy
 
-- **Privacy Policy:** [https://wisnu-w.github.io/OpenTermius/privacy.html](https://wisnu-w.github.io/OpenTermius/privacy.html)
+- **Privacy Policy:** [https://open-foundation-org.github.io/OpenTermius/privacy.html](https://open-foundation-org.github.io/OpenTermius/privacy.html)
 - This program will not transfer any information to other networked systems unless specifically requested by the user or the person installing or operating it. OpenTermius operates in 100% offline Standalone Mode by default, or connects only to user-configured SSH servers and self-hosted Gateway URLs.

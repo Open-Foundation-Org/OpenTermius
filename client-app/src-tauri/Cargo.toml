@@ -4,7 +4,7 @@ version = "0.6.1"
 description = "OpenTermius - Self-hostable, zero-paywall SSH & SFTP client"
 authors = ["wisnu-w"]
 license = "Apache-2.0"
-repository = "https://github.com/wisnu-w/OpenTermius"
+repository = "https://github.com/Open-Foundation-Org/OpenTermius"
 edition = "2024"
 rust-version = "1.90"
 

@@ -3,9 +3,9 @@ set -euo pipefail
 
 # OpenTermius Universal Installer (Ubuntu/Debian, RHEL/Fedora, Arch, Alpine, macOS)
 # Usage:
-#   curl -fsSL https://raw.githubusercontent.com/wisnu-w/OpenTermius/main/scripts/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/Open-Foundation-Org/OpenTermius/main/scripts/install.sh | bash
 
-REPO_URL="${OPENTERMIUS_REPO:-https://github.com/wisnu-w/OpenTermius.git}"
+REPO_URL="${OPENTERMIUS_REPO:-https://github.com/Open-Foundation-Org/OpenTermius.git}"
 INSTALL_DIR="${OPENTERMIUS_DIR:-$HOME/opentermius}"
 GO_REQUIRED_MINOR=24
 GO_FALLBACK_VERSION="1.27.4"
