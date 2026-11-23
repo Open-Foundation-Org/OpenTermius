@@ -60,6 +60,6 @@ All encryption and decryption occurs in client memory using WebCrypto APIs (`win
 - [x] **No SQL Injection:** All queries use `$1, $2` parameters via `pgx`.
 - [x] **No IDOR (Insecure Direct Object Reference):** Every vault item query explicitly joins or filters against `vault_id` and user membership (`vault_members`).
 - [x] **No Hardcoded Secrets:** Zero hardcoded API keys, secrets, or default passwords.
-- [x] **CSRF / CORS Protection:** Explicit origin validation for WebSockets and API endpoints.
-- [x] **Rate Limiting:** Authentication endpoints are rate-limited to prevent brute-force attacks.
-- [x] **SSH Host Key Verification (TOFU):** Native Rust `russh` client verifies and persists server host key fingerprints (`~/.opentermius_known_hosts.json`) on first connection and rejects mismatched host keys to prevent MITM attacks.
+- [x] **CSRF / CORS Protection:** Explicit origin validation (`CORS_ALLOWED_ORIGINS`) for both REST API endpoints and WebSocket relay (`CollabHandler.SetAllowedOrigins`).
+- [x] **Rate Limiting:** Authentication & invite endpoints are rate-limited (`ipRateLimiter` with bounded memory eviction sweep) to prevent brute-force attacks.
+- [x] **SSH Host Key Verification (TOFU):** Native Rust `russh` client verifies and persists server host key fingerprints (`.opentermius_known_hosts.json` across macOS, Linux, Windows, and Android) on first connection, distinguishes network errors from `HOST_KEY_MISMATCH`, and requires explicit user action (`ssh_trust_host_key` / "Trust New Key") to rotate a changed server key.

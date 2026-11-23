@@ -147,6 +147,12 @@ func (p *PresenceUseCase) Heartbeat(
 		ActiveSessions: sessions,
 	}
 
+	for devKey, dev := range p.devices {
+		if devKey != key && now.Sub(dev.LastSeenAt) > 30*time.Minute {
+			delete(p.devices, devKey)
+		}
+	}
+
 	// Return pending remote requests targeted at this user (created in last 2 minutes)
 	var pending []RemoteRequest
 	for id, req := range p.requests {

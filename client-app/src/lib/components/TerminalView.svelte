@@ -637,6 +637,21 @@
     }
   }
 
+  async function handleTrustHostKey() {
+    if (!config?.address) return;
+    try {
+      const { invoke } = await import('@tauri-apps/api/core');
+      await invoke('ssh_trust_host_key', {
+        host: config.address,
+        port: config.port ?? 22
+      });
+      toast.success('Updated known host key');
+      await handleReconnect();
+    } catch (err: unknown) {
+      toast.error(err, 'Failed to reset host key');
+    }
+  }
+
   onMount(() => {
     if (!terminalContainer) return;
 
@@ -1122,12 +1137,22 @@
           <AlertCircle class="h-8 w-8 text-rose-400 mx-auto" />
           <h4 class="text-sm font-bold text-white">Connection Error</h4>
           <p class="text-xs text-rose-300">{errorMessage}</p>
-          <button
-            onclick={handleReconnect}
-            class="rounded-lg bg-rose-600 px-4 py-1.5 text-xs font-semibold text-white hover:bg-rose-500 transition"
-          >
-            Retry Connection
-          </button>
+          <div class="flex flex-wrap items-center justify-center gap-2">
+            {#if errorMessage?.includes('HOST_KEY_MISMATCH')}
+              <button
+                onclick={handleTrustHostKey}
+                class="rounded-lg bg-amber-600 px-4 py-1.5 text-xs font-semibold text-white hover:bg-amber-500 transition"
+              >
+                Trust New Key & Reconnect
+              </button>
+            {/if}
+            <button
+              onclick={handleReconnect}
+              class="rounded-lg bg-rose-600 px-4 py-1.5 text-xs font-semibold text-white hover:bg-rose-500 transition"
+            >
+              Retry Connection
+            </button>
+          </div>
         </div>
       </div>
     {/if}

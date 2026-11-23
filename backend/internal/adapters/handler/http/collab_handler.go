@@ -55,6 +55,19 @@ func NewCollabHandler(presenceUC *usecase.PresenceUseCase, authService ports.Aut
 	}
 }
 
+func (h *CollabHandler) SetAllowedOrigins(allowed map[string]bool) {
+	h.upgrader.CheckOrigin = func(r *http.Request) bool {
+		if len(allowed) == 0 {
+			return true
+		}
+		origin := r.Header.Get("Origin")
+		if origin == "" {
+			return true
+		}
+		return allowed[origin]
+	}
+}
+
 func (h *CollabHandler) getOrCreateRoom(sessionID string) *relayRoom {
 	h.roomsMu.Lock()
 	defer h.roomsMu.Unlock()

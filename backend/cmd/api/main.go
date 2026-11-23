@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
+	"sort"
 	"strings"
 	"syscall"
 	"time"
@@ -51,6 +53,7 @@ func main() {
 	} else {
 		defer pool.Close()
 		log.Println("Database connection pool initialized.")
+		runAutoMigrations(ctx, pool, "migrations", "../migrations")
 	}
 
 	// 2. Initialize Repositories (Outbound Adapters)
@@ -92,11 +95,11 @@ func main() {
 	router := httpAdapter.NewRouter(authUC, authHandler, vaultHandler, collabHandler, smtpHandler)
 
 	server := &http.Server{
-		Addr:         ":" + port,
-		Handler:      router,
-		ReadTimeout:  15 * time.Second,
-		WriteTimeout: 15 * time.Second,
-		IdleTimeout:  60 * time.Second,
+		Addr:              ":" + port,
+		Handler:           router,
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       15 * time.Second,
+		IdleTimeout:       60 * time.Second,
 	}
 
 	go func() {
@@ -123,6 +126,40 @@ func getEnv(key, defaultVal string) string {
 		return val
 	}
 	return defaultVal
+}
+
+func runAutoMigrations(ctx context.Context, pool *pgxpool.Pool, dirs ...string) {
+	for _, dir := range dirs {
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			continue
+		}
+		var files []string
+		for _, e := range entries {
+			if !e.IsDir() && strings.HasSuffix(e.Name(), ".up.sql") {
+				files = append(files, filepath.Join(dir, e.Name()))
+			}
+		}
+		if len(files) == 0 {
+			continue
+		}
+		sort.Strings(files)
+		for _, f := range files {
+			sqlBytes, err := os.ReadFile(f)
+			if err != nil {
+				log.Printf("Warning: failed to read migration %s: %v", f, err)
+				continue
+			}
+			migCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+			_, execErr := pool.Exec(migCtx, string(sqlBytes))
+			cancel()
+			if execErr != nil {
+				log.Printf("Warning: migration %s reported: %v", filepath.Base(f), execErr)
+			}
+		}
+		log.Printf("Verified %d SQL schema migrations from %s", len(files), dir)
+		return
+	}
 }
 
 func loadEnvFile(paths ...string) {

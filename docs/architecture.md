@@ -121,10 +121,9 @@ opentermius/
   - Stored in Supabase PostgreSQL under `vault_items` table with `kind: 'tunnel'`.
 
 ### 5. SFTP File Manager Subsystem
-- **Backend Architecture**:
-  - Implements `ports.SFTPService` via `github.com/pkg/sftp` on top of standard Go `crypto/ssh`.
-  - Supports directory listing with metadata (size, modTime, POSIX permissions), file streaming downloads, multipart uploads, folder creation, and recursive/single item deletion.
-  - Endpoints protected under `/api/v1/sftp/*` with JWT and standalone token compatibility.
+- **Native Rust SFTP Engine & Session Pool (`client-app/src-tauri/src/lib.rs`)**:
+  - Uses `russh` + `russh-sftp` directly from the client device (`sftp_list`, `sftp_mkdir`, `sftp_delete`, `sftp_read_bytes`, `sftp_write_bytes`).
+  - Pools active `SftpSession` connections per `host:port:username` in `SftpPoolState` with automatic transparent reconnect on channel expiry so directory navigation is instant without repeating SSH handshakes.
 - **Frontend Dual-Pane File Explorer (`SftpView.svelte` + `SftpPane.svelte`)**:
   - Termius-style side-by-side dual-pane layout on macOS/desktop (Left/Right pane switcher on mobile).
   - Each pane independently targets **Local Machine** (via native Tauri FS IPC commands `local_fs_*`) or any saved SSH Host (including same-host or cross-host).

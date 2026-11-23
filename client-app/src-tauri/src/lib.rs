@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, UNIX_EPOCH};
 
@@ -14,24 +15,40 @@ use tokio::io::AsyncWriteExt;
 
 static KNOWN_HOSTS: OnceLock<Mutex<HashMap<String, String>>> = OnceLock::new();
 
-fn known_hosts_path() -> Option<PathBuf> {
+fn user_home_dir() -> Option<PathBuf> {
     std::env::var("HOME")
+        .or_else(|_| std::env::var("USERPROFILE"))
         .ok()
         .map(PathBuf::from)
         .filter(|p| p.exists())
+}
+
+fn known_hosts_path() -> Option<PathBuf> {
+    user_home_dir()
+        .or_else(|| Some(std::env::temp_dir()))
         .map(|p| p.join(".opentermius_known_hosts.json"))
 }
 
-fn verify_or_record_host_key(host_port: &str, key_repr: &str) -> bool {
-    let mutex = KNOWN_HOSTS.get_or_init(|| {
+fn known_hosts_map() -> &'static Mutex<HashMap<String, String>> {
+    KNOWN_HOSTS.get_or_init(|| {
         let map = known_hosts_path()
             .and_then(|p| std::fs::read_to_string(p).ok())
             .and_then(|s| serde_json::from_str::<HashMap<String, String>>(&s).ok())
             .unwrap_or_default();
         Mutex::new(map)
-    });
+    })
+}
 
-    let Ok(mut map) = mutex.lock() else {
+fn persist_known_hosts(map: &HashMap<String, String>) {
+    if let Some(path) = known_hosts_path() {
+        if let Ok(json) = serde_json::to_string_pretty(map) {
+            let _ = std::fs::write(path, json);
+        }
+    }
+}
+
+fn verify_or_record_host_key(host_port: &str, key_repr: &str) -> bool {
+    let Ok(mut map) = known_hosts_map().lock() else {
         return true;
     };
 
@@ -40,12 +57,30 @@ fn verify_or_record_host_key(host_port: &str, key_repr: &str) -> bool {
     }
 
     map.insert(host_port.to_string(), key_repr.to_string());
-    if let Some(path) = known_hosts_path() {
-        if let Ok(json) = serde_json::to_string_pretty(&*map) {
-            let _ = std::fs::write(path, json);
+    persist_known_hosts(&map);
+    true
+}
+
+fn normalize_host_port(raw_host: &str, default_port: u16) -> (String, u16) {
+    let trimmed = raw_host.trim();
+    if let Some(rest) = trimmed.strip_prefix('[') {
+        if let Some((ipv6, port_part)) = rest.split_once(']') {
+            if let Some(p_str) = port_part.strip_prefix(':') {
+                if let Ok(p) = p_str.trim().parse::<u16>() {
+                    return (ipv6.to_string(), p);
+                }
+            }
+            return (ipv6.to_string(), default_port);
         }
     }
-    true
+    if trimmed.matches(':').count() == 1 {
+        if let Some((h, p_str)) = trimmed.rsplit_once(':') {
+            if let Ok(p) = p_str.trim().parse::<u16>() {
+                return (h.trim().to_string(), p);
+            }
+        }
+    }
+    (trimmed.to_string(), default_port)
 }
 
 fn drain_utf8_chunk(pending: &mut Vec<u8>, incoming: &[u8]) -> String {
@@ -83,6 +118,7 @@ fn drain_utf8_chunk(pending: &mut Vec<u8>, incoming: &[u8]) -> String {
 
 struct SshClientHandler {
     host_port: String,
+    key_mismatch: Arc<AtomicBool>,
 }
 
 impl client::Handler for SshClientHandler {
@@ -93,8 +129,30 @@ impl client::Handler for SshClientHandler {
         server_public_key: &PublicKeyOrCertificate,
     ) -> Result<bool, Self::Error> {
         let key_repr = format!("{:?}", server_public_key);
-        Ok(verify_or_record_host_key(&self.host_port, &key_repr))
+        let ok = verify_or_record_host_key(&self.host_port, &key_repr);
+        if !ok {
+            self.key_mismatch.store(true, Ordering::SeqCst);
+        }
+        Ok(ok)
     }
+}
+
+#[tauri::command]
+async fn ssh_trust_host_key(
+    sftp_pool: State<'_, SftpPoolState>,
+    host: String,
+    port: Option<u16>,
+) -> Result<(), String> {
+    let (clean_host, actual_port) = normalize_host_port(&host, port.unwrap_or(22));
+    let key = format!("{}:{}", clean_host, actual_port);
+    if let Ok(mut map) = known_hosts_map().lock() {
+        map.remove(&key);
+        persist_known_hosts(&map);
+    }
+    let prefix = format!("{}:", key);
+    let mut sessions = sftp_pool.sessions.lock().await;
+    sessions.retain(|k, _| !k.starts_with(&prefix));
+    Ok(())
 }
 
 enum SessionHandle {
@@ -135,6 +193,7 @@ async fn establish_ssh_session(
     private_key: Option<&str>,
     passphrase: Option<&str>,
 ) -> Result<client::Handle<SshClientHandler>, String> {
+    let (clean_host, actual_port) = normalize_host_port(host, port);
     let config = Arc::new(client::Config {
         inactivity_timeout: None,
         keepalive_interval: Some(Duration::from_secs(15)),
@@ -142,17 +201,28 @@ async fn establish_ssh_session(
         ..Default::default()
     });
 
-    let addr = (host, port);
+    let addr = (clean_host.as_str(), actual_port);
+    let key_mismatch = Arc::new(AtomicBool::new(false));
     let handler = SshClientHandler {
-        host_port: format!("{}:{}", host.trim(), port),
+        host_port: format!("{}:{}", clean_host, actual_port),
+        key_mismatch: key_mismatch.clone(),
     };
     let mut session = tokio::time::timeout(
         Duration::from_secs(15),
         client::connect(config, addr, handler),
     )
     .await
-    .map_err(|_| format!("Connection timed out to {}:{}", host, port))?
-    .map_err(|e| format!("SSH connection failed (or host key mismatch): {}", e))?;
+    .map_err(|_| format!("Connection timed out to {}:{}", clean_host, actual_port))?
+    .map_err(|e| {
+        if key_mismatch.load(Ordering::SeqCst) {
+            format!(
+                "HOST_KEY_MISMATCH:{}:{} — Server host key changed. Click 'Trust New Key' if this server was reinstalled.",
+                clean_host, actual_port
+            )
+        } else {
+            format!("SSH connection failed to {}:{}: {}", clean_host, actual_port, e)
+        }
+    })?;
 
     let user = if username.trim().is_empty() {
         "root"
@@ -308,21 +378,30 @@ async fn terminal_open(
 
     let pair = pty_system.openpty(size).map_err(|e| e.to_string())?;
 
-    #[cfg(target_os = "android")]
-    let default_shell = "/system/bin/sh";
-    #[cfg(not(target_os = "android"))]
-    let default_shell = "/bin/zsh";
-
-    let shell = std::env::var("SHELL")
+    #[cfg(target_os = "windows")]
+    let shell = std::env::var("COMSPEC")
         .ok()
         .filter(|s| std::path::Path::new(s).exists())
-        .unwrap_or_else(|| {
-            if std::path::Path::new(default_shell).exists() {
-                default_shell.to_string()
-            } else {
-                "/bin/sh".to_string()
-            }
-        });
+        .unwrap_or_else(|| "powershell.exe".to_string());
+
+    #[cfg(not(target_os = "windows"))]
+    let shell = {
+        #[cfg(target_os = "android")]
+        let default_shell = "/system/bin/sh";
+        #[cfg(not(target_os = "android"))]
+        let default_shell = "/bin/zsh";
+
+        std::env::var("SHELL")
+            .ok()
+            .filter(|s| std::path::Path::new(s).exists())
+            .unwrap_or_else(|| {
+                if std::path::Path::new(default_shell).exists() {
+                    default_shell.to_string()
+                } else {
+                    "/bin/sh".to_string()
+                }
+            })
+    };
 
     let mut cmd = CommandBuilder::new(shell);
     cmd.env("TERM", "xterm-256color");
@@ -508,6 +587,26 @@ pub struct RemoteSftpListResult {
     pub items: Vec<RemoteSftpItem>,
 }
 
+struct PooledSftp {
+    _ssh: client::Handle<SshClientHandler>,
+    sftp: Arc<SftpSession>,
+}
+
+#[derive(Default)]
+pub struct SftpPoolState {
+    sessions: Arc<tokio::sync::Mutex<HashMap<String, PooledSftp>>>,
+}
+
+fn sftp_pool_key(cfg: &SftpConnectionConfig) -> String {
+    let (clean_host, actual_port) = normalize_host_port(&cfg.address, cfg.port.unwrap_or(22));
+    let user = if cfg.username.trim().is_empty() {
+        "root"
+    } else {
+        cfg.username.trim()
+    };
+    format!("{}:{}:{}", clean_host, actual_port, user)
+}
+
 async fn open_sftp_session(
     cfg: &SftpConnectionConfig,
 ) -> Result<(client::Handle<SshClientHandler>, SftpSession), String> {
@@ -538,27 +637,67 @@ async fn open_sftp_session(
     Ok((session, sftp))
 }
 
+async fn get_pooled_sftp(
+    pool: &SftpPoolState,
+    cfg: &SftpConnectionConfig,
+    force_new: bool,
+) -> Result<Arc<SftpSession>, String> {
+    let key = sftp_pool_key(cfg);
+    if !force_new {
+        let sessions = pool.sessions.lock().await;
+        if let Some(existing) = sessions.get(&key) {
+            return Ok(existing.sftp.clone());
+        }
+    }
+    let (ssh, sftp) = open_sftp_session(cfg).await?;
+    let arc_sftp = Arc::new(sftp);
+    let mut sessions = pool.sessions.lock().await;
+    sessions.insert(
+        key,
+        PooledSftp {
+            _ssh: ssh,
+            sftp: arc_sftp.clone(),
+        },
+    );
+    Ok(arc_sftp)
+}
+
+async fn evict_pooled_sftp(pool: &SftpPoolState, cfg: &SftpConnectionConfig) {
+    let key = sftp_pool_key(cfg);
+    pool.sessions.lock().await.remove(&key);
+}
+
 #[tauri::command]
 async fn sftp_list(
+    pool: State<'_, SftpPoolState>,
     config: SftpConnectionConfig,
     path: String,
 ) -> Result<RemoteSftpListResult, String> {
-    let (_ssh, sftp) = open_sftp_session(&config).await?;
+    let mut sftp = get_pooled_sftp(&pool, &config, false).await?;
     let target = if path.trim().is_empty() {
         "."
     } else {
         path.trim()
     };
 
-    let canonical = sftp
+    let mut canonical = sftp
         .canonicalize(target)
         .await
         .unwrap_or_else(|_| target.to_string());
 
-    let read_dir = sftp
-        .read_dir(&canonical)
-        .await
-        .map_err(|e| format!("Failed to read remote directory '{}': {}", canonical, e))?;
+    let read_dir = match sftp.read_dir(&canonical).await {
+        Ok(rd) => rd,
+        Err(_) => {
+            sftp = get_pooled_sftp(&pool, &config, true).await?;
+            canonical = sftp
+                .canonicalize(target)
+                .await
+                .unwrap_or_else(|_| target.to_string());
+            sftp.read_dir(&canonical)
+                .await
+                .map_err(|e| format!("Failed to read remote directory '{}': {}", canonical, e))?
+        }
+    };
 
     let mut items = Vec::new();
     for entry in read_dir {
@@ -598,7 +737,6 @@ async fn sftp_list(
             .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
     });
 
-    let _ = sftp.close().await;
     Ok(RemoteSftpListResult {
         path: canonical,
         items,
@@ -606,23 +744,36 @@ async fn sftp_list(
 }
 
 #[tauri::command]
-async fn sftp_mkdir(config: SftpConnectionConfig, path: String) -> Result<(), String> {
-    let (_ssh, sftp) = open_sftp_session(&config).await?;
-    sftp.create_dir(&path)
-        .await
-        .map_err(|e| format!("Failed to create remote directory '{}': {}", path, e))?;
-    let _ = sftp.close().await;
+async fn sftp_mkdir(
+    pool: State<'_, SftpPoolState>,
+    config: SftpConnectionConfig,
+    path: String,
+) -> Result<(), String> {
+    let sftp = get_pooled_sftp(&pool, &config, false).await?;
+    if sftp.create_dir(&path).await.is_err() {
+        let sftp = get_pooled_sftp(&pool, &config, true).await?;
+        sftp.create_dir(&path)
+            .await
+            .map_err(|e| format!("Failed to create remote directory '{}': {}", path, e))?;
+    }
     Ok(())
 }
 
 #[tauri::command]
-async fn sftp_delete(config: SftpConnectionConfig, path: String) -> Result<(), String> {
-    let (_ssh, sftp) = open_sftp_session(&config).await?;
-    let is_dir = sftp
-        .metadata(&path)
-        .await
-        .map(|m| m.is_dir())
-        .unwrap_or(false);
+async fn sftp_delete(
+    pool: State<'_, SftpPoolState>,
+    config: SftpConnectionConfig,
+    path: String,
+) -> Result<(), String> {
+    let mut sftp = get_pooled_sftp(&pool, &config, false).await?;
+    let meta = match sftp.metadata(&path).await {
+        Ok(m) => Ok(m),
+        Err(_) => {
+            sftp = get_pooled_sftp(&pool, &config, true).await?;
+            sftp.metadata(&path).await
+        }
+    };
+    let is_dir = meta.map(|m| m.is_dir()).unwrap_or(false);
 
     if is_dir {
         sftp.remove_dir(&path)
@@ -633,53 +784,63 @@ async fn sftp_delete(config: SftpConnectionConfig, path: String) -> Result<(), S
             .await
             .map_err(|e| format!("Failed to delete remote file '{}': {}", path, e))?;
     }
-    let _ = sftp.close().await;
     Ok(())
 }
 
 const MAX_TRANSFER_BYTES: u64 = 100 * 1024 * 1024; // 100 MB safety cap
 
 #[tauri::command]
-async fn sftp_read_bytes(config: SftpConnectionConfig, path: String) -> Result<Vec<u8>, String> {
-    let (_ssh, sftp) = open_sftp_session(&config).await?;
-    let meta = sftp
-        .metadata(&path)
-        .await
-        .map_err(|e| format!("Failed to stat '{}': {}", path, e))?;
+async fn sftp_read_bytes(
+    pool: State<'_, SftpPoolState>,
+    config: SftpConnectionConfig,
+    path: String,
+) -> Result<Vec<u8>, String> {
+    let mut sftp = get_pooled_sftp(&pool, &config, false).await?;
+    let meta = match sftp.metadata(&path).await {
+        Ok(m) => m,
+        Err(_) => {
+            sftp = get_pooled_sftp(&pool, &config, true).await?;
+            sftp.metadata(&path)
+                .await
+                .map_err(|e| format!("Failed to stat '{}': {}", path, e))?
+        }
+    };
     if meta.len() > MAX_TRANSFER_BYTES {
-        let _ = sftp.close().await;
         return Err(format!(
             "File '{}' exceeds 100 MB in-memory transfer limit",
             path
         ));
     }
-    let bytes = sftp
-        .read(&path)
+    sftp.read(&path)
         .await
-        .map_err(|e| format!("Failed to download '{}': {}", path, e))?;
-    let _ = sftp.close().await;
-    Ok(bytes)
+        .map_err(|e| format!("Failed to download '{}': {}", path, e))
 }
 
 #[tauri::command]
 async fn sftp_write_bytes(
+    pool: State<'_, SftpPoolState>,
     config: SftpConnectionConfig,
     path: String,
     data: Vec<u8>,
 ) -> Result<(), String> {
-    let (_ssh, sftp) = open_sftp_session(&config).await?;
-    let mut file = sftp
-        .create(&path)
-        .await
-        .map_err(|e| format!("Failed to create remote file '{}': {}", path, e))?;
-    file.write_all(&data)
-        .await
-        .map_err(|e| format!("Failed to write remote file '{}': {}", path, e))?;
+    let mut sftp = get_pooled_sftp(&pool, &config, false).await?;
+    let mut file = match sftp.create(&path).await {
+        Ok(f) => f,
+        Err(_) => {
+            sftp = get_pooled_sftp(&pool, &config, true).await?;
+            sftp.create(&path)
+                .await
+                .map_err(|e| format!("Failed to create remote file '{}': {}", path, e))?
+        }
+    };
+    if let Err(e) = file.write_all(&data).await {
+        evict_pooled_sftp(&pool, &config).await;
+        return Err(format!("Failed to write remote file '{}': {}", path, e));
+    }
     file.flush()
         .await
         .map_err(|e| format!("Failed to flush remote file '{}': {}", path, e))?;
     let _ = file.shutdown().await;
-    let _ = sftp.close().await;
     Ok(())
 }
 
@@ -713,17 +874,13 @@ async fn local_fs_list(path: String) -> Result<LocalFsListResult, String> {
             #[cfg(not(target_os = "android"))]
             let fallback = PathBuf::from("/");
 
-            std::env::var("HOME")
-                .map(PathBuf::from)
-                .ok()
-                .filter(|p| p.exists())
-                .unwrap_or_else(|| {
-                    if fallback.exists() {
-                        fallback
-                    } else {
-                        PathBuf::from("/")
-                    }
-                })
+            user_home_dir().unwrap_or_else(|| {
+                if fallback.exists() {
+                    fallback
+                } else {
+                    PathBuf::from("/")
+                }
+            })
         } else {
             PathBuf::from(path.trim())
         };
@@ -829,6 +986,7 @@ pub fn run() {
     #[allow(unused_mut)]
     let mut builder = tauri::Builder::default()
         .manage(TerminalState::default())
+        .manage(SftpPoolState::default())
         .plugin(
             tauri_plugin_log::Builder::default()
                 .level(log::LevelFilter::Info)
@@ -848,6 +1006,7 @@ pub fn run() {
             terminal_write,
             terminal_resize,
             terminal_close,
+            ssh_trust_host_key,
             sftp_list,
             sftp_mkdir,
             sftp_delete,

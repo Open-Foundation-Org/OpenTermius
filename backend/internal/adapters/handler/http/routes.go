@@ -42,7 +42,7 @@ func (l *ipRateLimiter) allow(ip string) bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
-	if now.Sub(l.lastGC) > l.window {
+	if now.Sub(l.lastGC) > l.window || len(l.hits) > 2048 {
 		for k, times := range l.hits {
 			var kept []time.Time
 			for _, t := range times {
@@ -123,6 +123,9 @@ func NewRouter(
 		adminEmail:          adminEmail,
 		allowPublicRegister: allowPublic,
 		allowedOrigins:      allowedOrigins,
+	}
+	if collabHandler != nil {
+		collabHandler.SetAllowedOrigins(allowedOrigins)
 	}
 	r.registerRoutes()
 	return r

@@ -158,6 +158,22 @@
     }
   }
 
+  async function handleTrustHostKey() {
+    const config = getHostConfig();
+    if (!config?.address) return;
+    try {
+      const { invoke } = await import('@tauri-apps/api/core');
+      await invoke('ssh_trust_host_key', {
+        host: config.address,
+        port: config.port ?? 22
+      });
+      toast.success('Updated known host key');
+      await loadDirectory(currentPath);
+    } catch (err: unknown) {
+      toast.error(err, 'Failed to reset host key');
+    }
+  }
+
   let lastTargetId = $state('');
   let lastRefreshSignal = $state(0);
 
@@ -437,13 +453,24 @@
       <div class="flex h-full flex-col items-center justify-center p-6 text-center space-y-2">
         <AlertCircle class="h-6 w-6 text-rose-400" />
         <p class="text-xs text-rose-300 max-w-xs">{errorMessage}</p>
-        <button
-          type="button"
-          onclick={() => loadDirectory(currentPath)}
-          class="rounded-md bg-[#1a1a24] border border-[#2b2b3a] px-3 py-1 text-xs text-white hover:bg-[#222230]"
-        >
-          Retry
-        </button>
+        <div class="flex flex-wrap items-center justify-center gap-2">
+          {#if errorMessage?.includes('HOST_KEY_MISMATCH')}
+            <button
+              type="button"
+              onclick={handleTrustHostKey}
+              class="rounded-md bg-amber-600 px-3 py-1 text-xs font-semibold text-white hover:bg-amber-500"
+            >
+              Trust New Key & Retry
+            </button>
+          {/if}
+          <button
+            type="button"
+            onclick={() => loadDirectory(currentPath)}
+            class="rounded-md bg-[#1a1a24] border border-[#2b2b3a] px-3 py-1 text-xs text-white hover:bg-[#222230]"
+          >
+            Retry
+          </button>
+        </div>
       </div>
     {:else if loadState === 'empty' || filteredItems.length === 0}
       <div class="flex h-full flex-col items-center justify-center p-6 text-center text-xs text-neutral-500">

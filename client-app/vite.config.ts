@@ -9,6 +9,9 @@ export default defineConfig({
     tailwindcss(),
     svelte()
   ],
+  optimizeDeps: {
+    include: ['@lucide/svelte']
+  },
   server: {
     port: 5173,
     strictPort: true,
