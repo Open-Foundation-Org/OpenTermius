@@ -5,13 +5,14 @@ DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 APP_DIR="$DIR/src-tauri/target/release/bundle/macos"
 DMG_DIR="$DIR/src-tauri/target/release/bundle/dmg"
 APP_NAME="opentermius.app"
-DMG_NAME="OpenTermius_0.6.0_aarch64.dmg"
+DMG_NAME="OpenTermius_0.6.1_aarch64.dmg"
 STAGING_DIR="/tmp/opentermius-dmg-staging"
 RW_DMG="/tmp/opentermius-rw.dmg"
 
 if [ -z "${TAURI_SIGNING_PRIVATE_KEY:-}" ] && [ -f "$HOME/.tauri/opentermius.key" ]; then
   export TAURI_SIGNING_PRIVATE_KEY="$HOME/.tauri/opentermius.key"
 fi
+export TAURI_SIGNING_PRIVATE_KEY_PASSWORD="${TAURI_SIGNING_PRIVATE_KEY_PASSWORD:-}"
 
 echo "1. Building release binary..."
 cd "$DIR"
