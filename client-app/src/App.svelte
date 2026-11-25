@@ -1274,17 +1274,22 @@
       {/if}
     {:else}
       <header
-        data-tauri-drag-region
-        class="flex h-11 items-center justify-between border-b border-[#1c1c25] bg-[#111116] px-2.5 sm:px-3 shrink-0 {platform.isMac && platform.isNativeTauri && isSidebarCollapsed ? 'pl-20' : ''}"
+        data-tauri-drag-region={platform.isMac && platform.isNativeTauri ? '' : undefined}
+        class="flex h-11 items-center justify-between border-b border-[#1c1c25] bg-[#111116] pl-2.5 pr-2.5 sm:pl-3 sm:pr-3 shrink-0"
+        style={platform.isMac && platform.isNativeTauri && (isSidebarCollapsed || !platform.isDesktop) ? 'padding-left: 84px;' : undefined}
       >
         <!-- Left: Mobile Menu / Desktop Toggle + Tabs Bar -->
-        <div data-tauri-drag-region class="flex items-center gap-1 overflow-x-auto no-scrollbar flex-1 mr-2 sm:mr-4">
-          <!-- Tablet Drawer Toggle Button -->
+        <div class="flex items-center gap-1 overflow-x-auto no-scrollbar min-w-0">
+          <!-- Tablet / Half-Screen Drawer Toggle Button -->
           <button
             type="button"
-            onclick={() => (isMobileMenuOpen = !isMobileMenuOpen)}
-            class="flex lg:hidden items-center justify-center rounded-lg p-1.5 text-neutral-400 hover:text-white hover:bg-[#1a1a24] transition mr-0.5 shrink-0"
+            onclick={() => {
+              isSidebarCollapsed = false;
+              isMobileMenuOpen = !isMobileMenuOpen;
+            }}
+            class="flex lg:hidden items-center justify-center rounded-lg p-1.5 text-neutral-400 hover:text-white hover:bg-[#1a1a24] transition mr-0.5 shrink-0 cursor-pointer"
             aria-label="Toggle navigation menu"
+            title={platform.isMac ? 'Show Navigation (⌘B)' : 'Show Navigation (Ctrl+Shift+B)'}
           >
             <Menu class="h-4 w-4 text-emerald-400" />
           </button>
@@ -1293,8 +1298,11 @@
           <button
             type="button"
             onclick={() => (isSidebarCollapsed = !isSidebarCollapsed)}
-            class="hidden lg:flex items-center justify-center rounded-lg p-1.5 text-neutral-400 hover:text-white hover:bg-[#1a1a24] transition mr-1 shrink-0"
-            title={isSidebarCollapsed ? "Show Sidebar (⌘B)" : "Hide Sidebar (⌘B)"}
+            class="hidden lg:flex items-center justify-center rounded-lg p-1.5 text-neutral-400 hover:text-white hover:bg-[#1a1a24] transition mr-1 shrink-0 cursor-pointer"
+            aria-label={isSidebarCollapsed ? 'Show Sidebar' : 'Hide Sidebar'}
+            title={isSidebarCollapsed
+              ? platform.isMac ? 'Show Sidebar (⌘B)' : 'Show Sidebar (Ctrl+Shift+B)'
+              : platform.isMac ? 'Hide Sidebar (⌘B)' : 'Hide Sidebar (Ctrl+Shift+B)'}
           >
             {#if isSidebarCollapsed}
               <PanelLeftOpen class="h-4 w-4 text-emerald-400" />
@@ -1343,21 +1351,27 @@
 
           <button
             onclick={openQuickConnect}
-            class="flex items-center justify-center h-7 w-7 rounded-lg border border-[#20202a] bg-[#14141a] text-neutral-400 hover:text-white hover:border-[#30303e] transition shrink-0"
-            title="New Connection Tab (⌘T / Ctrl+T)"
+            class="flex items-center justify-center h-7 w-7 rounded-lg border border-[#20202a] bg-[#14141a] text-neutral-400 hover:text-white hover:border-[#30303e] transition shrink-0 cursor-pointer"
+            title={platform.isMac ? 'New Connection Tab (⌘T)' : 'New Connection Tab (Ctrl+J)'}
             aria-label="New Connection Tab"
           >
             <Plus class="h-3.5 w-3.5" />
           </button>
         </div>
+
+        {#if platform.isMac && platform.isNativeTauri}
+          <div data-tauri-drag-region class="flex-1 self-stretch min-w-6"></div>
+        {/if}
       </header>
     {/if}
 
     <!-- Dynamic Screen Content -->
     <div class="flex-1 min-h-0 overflow-hidden bg-[#0a0a0c]">
       {#if !isAuthenticated}
-        <!-- Top macOS drag region on auth/mode screen -->
-        <div data-tauri-drag-region class="fixed top-0 left-0 right-0 h-8 z-40"></div>
+        {#if platform.isMac && platform.isNativeTauri}
+          <!-- Top macOS drag region on auth/mode screen -->
+          <div data-tauri-drag-region class="fixed top-0 left-0 right-0 h-8 z-40"></div>
+        {/if}
         <!-- Initial Setup / Connection Mode Screen -->
         <div class="flex h-full items-center justify-center p-6 overflow-y-auto">
           {#if connectionChoice === 'select'}

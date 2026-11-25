@@ -43,9 +43,11 @@
     padding-right: var(--sar);
   }
 
-  button, a, [role="button"] {
+  button, a, input, select, textarea, [role="button"] {
     touch-action: manipulation;
     -webkit-tap-highlight-color: transparent;
+    -webkit-app-region: no-drag;
+    app-region: no-drag;
   }
 }
 

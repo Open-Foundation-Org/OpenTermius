@@ -129,8 +129,8 @@
         <button
           type="button"
           onclick={onToggleCollapse}
-          class="hidden lg:block text-zinc-500 hover:text-zinc-200 p-1 rounded-md hover:bg-white/[0.05] transition shrink-0"
-          title="Hide Sidebar (⌘B)"
+          class="hidden lg:block text-zinc-500 hover:text-zinc-200 p-1 rounded-md hover:bg-white/[0.05] transition shrink-0 cursor-pointer"
+          title={platform.isMac ? 'Hide Sidebar (⌘B)' : 'Hide Sidebar (Ctrl+Shift+B)'}
         >
           <PanelLeftClose class="h-3.5 w-3.5" />
         </button>
