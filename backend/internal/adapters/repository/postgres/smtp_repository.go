@@ -208,7 +208,19 @@ func (r *InviteRepository) GetByTokenHash(ctx context.Context, tokenHash string)
 }
 
 func (r *InviteRepository) MarkUsed(ctx context.Context, id uuid.UUID) error {
-	const query = `UPDATE user_invites SET used_at = CURRENT_TIMESTAMP WHERE id = $1`
+	const query = `UPDATE user_invites SET used_at = CURRENT_TIMESTAMP WHERE id = $1 AND used_at IS NULL`
+	tag, err := r.pool.Exec(ctx, query, id)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return domain.ErrConflict
+	}
+	return nil
+}
+
+func (r *InviteRepository) MarkUnused(ctx context.Context, id uuid.UUID) error {
+	const query = `UPDATE user_invites SET used_at = NULL WHERE id = $1`
 	_, err := r.pool.Exec(ctx, query, id)
 	return err
 }

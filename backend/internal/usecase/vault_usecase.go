@@ -2,12 +2,23 @@ package usecase
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/opentermius/opentermius/internal/domain"
 	"github.com/opentermius/opentermius/internal/ports"
 )
+
+func generateRandomVaultSecret() string {
+	buf := make([]byte, 32)
+	if _, err := rand.Read(buf); err != nil {
+		return uuid.NewString() + uuid.NewString()
+	}
+	return hex.EncodeToString(buf)
+}
 
 type VaultUseCase struct {
 	vaultRepo ports.VaultRepository
@@ -62,7 +73,7 @@ func (v *VaultUseCase) ListUserVaults(ctx context.Context, userID uuid.UUID) ([]
 		return nil, err
 	}
 	if len(vaults) == 0 && userID != uuid.Nil {
-		personal, createErr := v.CreateVault(ctx, userID, "Personal Vault", domain.VaultTypePersonal, "e2ee-personal-vault-key")
+		personal, createErr := v.CreateVault(ctx, userID, "Personal Vault", domain.VaultTypePersonal, generateRandomVaultSecret())
 		if createErr == nil && personal != nil {
 			return []domain.Vault{*personal}, nil
 		}
@@ -143,16 +154,27 @@ func (v *VaultUseCase) UpdateItem(ctx context.Context, userID, vaultID, itemID u
 }
 
 func (v *VaultUseCase) DeleteItem(ctx context.Context, userID, vaultID, itemID uuid.UUID) error {
-	_, err := v.vaultRepo.GetMemberRole(ctx, vaultID, userID)
+	role, err := v.vaultRepo.GetMemberRole(ctx, vaultID, userID)
 	if err != nil {
 		return domain.ErrForbidden
+	}
+	if role == domain.VaultRoleMember {
+		if vault, vErr := v.vaultRepo.GetByID(ctx, vaultID); vErr == nil && vault != nil && vault.Type == domain.VaultTypeTeam {
+			return domain.ErrForbidden
+		}
 	}
 	return v.vaultRepo.DeleteItem(ctx, vaultID, itemID)
 }
 
 func (v *VaultUseCase) MoveItem(ctx context.Context, userID, sourceVaultID, targetVaultID, itemID uuid.UUID) error {
-	if _, err := v.vaultRepo.GetMemberRole(ctx, sourceVaultID, userID); err != nil {
+	sourceRole, err := v.vaultRepo.GetMemberRole(ctx, sourceVaultID, userID)
+	if err != nil {
 		return domain.ErrForbidden
+	}
+	if sourceRole == domain.VaultRoleMember {
+		if srcVault, vErr := v.vaultRepo.GetByID(ctx, sourceVaultID); vErr == nil && srcVault != nil && srcVault.Type == domain.VaultTypeTeam {
+			return domain.ErrForbidden
+		}
 	}
 	if _, err := v.vaultRepo.GetMemberRole(ctx, targetVaultID, userID); err != nil {
 		return domain.ErrForbidden
@@ -166,8 +188,17 @@ func (v *VaultUseCase) InviteMember(ctx context.Context, callerID, vaultID uuid.
 		return nil, domain.ErrForbidden
 	}
 
-	if role == "" {
-		role = domain.VaultRoleMember
+	normalizedRole := domain.VaultRole(strings.ToLower(strings.TrimSpace(string(role))))
+	if normalizedRole == "" {
+		normalizedRole = domain.VaultRoleMember
+	}
+	switch normalizedRole {
+	case domain.VaultRoleOwner, domain.VaultRoleAdmin, domain.VaultRoleMember:
+	default:
+		return nil, domain.ErrInvalidInput
+	}
+	if normalizedRole == domain.VaultRoleOwner && callerRole != domain.VaultRoleOwner {
+		return nil, domain.ErrForbidden
 	}
 
 	vault, err := v.vaultRepo.GetByID(ctx, vaultID)
@@ -175,7 +206,7 @@ func (v *VaultUseCase) InviteMember(ctx context.Context, callerID, vaultID uuid.
 		return nil, err
 	}
 
-	targetUser, err := v.userRepo.GetByEmail(ctx, email)
+	targetUser, err := v.userRepo.GetByEmail(ctx, strings.ToLower(strings.TrimSpace(email)))
 	if err != nil {
 		return nil, domain.ErrNotFound
 	}
@@ -184,7 +215,7 @@ func (v *VaultUseCase) InviteMember(ctx context.Context, callerID, vaultID uuid.
 		ID:                uuid.New(),
 		VaultID:           vaultID,
 		UserID:            targetUser.ID,
-		Role:              role,
+		Role:              normalizedRole,
 		EncryptedVaultKey: vault.EncryptedKey,
 		CreatedAt:         time.Now().UTC(),
 	}

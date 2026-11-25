@@ -2,6 +2,7 @@ package usecase
 
 import (
 	"context"
+	"strings"
 	"sync"
 	"time"
 
@@ -171,6 +172,9 @@ func (p *PresenceUseCase) Heartbeat(
 }
 
 func (p *PresenceUseCase) ListPresence(ctx context.Context, callerID uuid.UUID, vaultIDFilter string) ([]DevicePresence, error) {
+	var allowedVaults map[string]bool
+	isAdmin := false
+
 	if vaultIDFilter != "" {
 		vid, err := uuid.Parse(vaultIDFilter)
 		if err != nil {
@@ -178,6 +182,17 @@ func (p *PresenceUseCase) ListPresence(ctx context.Context, callerID uuid.UUID, 
 		}
 		if _, err := p.vaultRepo.GetMemberRole(ctx, vid, callerID); err != nil {
 			return nil, domain.ErrForbidden
+		}
+	} else {
+		if caller, err := p.userRepo.GetByID(ctx, callerID); err == nil && caller != nil && strings.EqualFold(caller.Role, "admin") {
+			isAdmin = true
+		} else {
+			allowedVaults = make(map[string]bool)
+			if vaults, err := p.vaultRepo.ListByUser(ctx, callerID); err == nil {
+				for _, v := range vaults {
+					allowedVaults[v.ID.String()] = true
+				}
+			}
 		}
 	}
 
@@ -191,15 +206,28 @@ func (p *PresenceUseCase) ListPresence(ctx context.Context, callerID uuid.UUID, 
 		if !isOnline && now.Sub(d.LastSeenAt) > 10*time.Minute {
 			continue
 		}
+		isOwnDevice := d.UserID == callerID
+		if vaultIDFilter == "" && !isAdmin && !isOwnDevice && len(allowedVaults) == 0 {
+			continue
+		}
+
 		copyDev := *d
 		copyDev.Online = isOnline
 		if !isOnline {
+			if vaultIDFilter != "" || (!isAdmin && !isOwnDevice) {
+				continue
+			}
 			copyDev.ActiveSessions = []ActiveSessionInfo{}
 		} else {
 			var enriched []ActiveSessionInfo
 			for _, s := range d.ActiveSessions {
 				if vaultIDFilter != "" && s.VaultID != vaultIDFilter {
 					continue
+				}
+				if vaultIDFilter == "" && !isAdmin && !isOwnDevice {
+					if s.VaultID == "" || !allowedVaults[s.VaultID] {
+						continue
+					}
 				}
 				if viewers, ok := p.sessionViewers[s.SessionID]; ok && len(viewers) > 0 {
 					s.Viewers = append([]RelayParticipant(nil), viewers...)
@@ -217,6 +245,9 @@ func (p *PresenceUseCase) ListPresence(ctx context.Context, callerID uuid.UUID, 
 			}
 			if enriched == nil {
 				enriched = []ActiveSessionInfo{}
+			}
+			if !isAdmin && !isOwnDevice && len(enriched) == 0 {
+				continue
 			}
 			copyDev.ActiveSessions = enriched
 		}
@@ -359,15 +390,16 @@ func (p *PresenceUseCase) ValidateRelayJoin(sessionID string, userID uuid.UUID, 
 
 	if role == "host" {
 		for _, d := range p.devices {
-			if d.UserID == userID {
-				for _, s := range d.ActiveSessions {
-					if s.SessionID == sessionID {
-						return "host", true
+			for _, s := range d.ActiveSessions {
+				if s.SessionID == sessionID {
+					if d.UserID != userID {
+						return "", false
 					}
+					return "host", true
 				}
 			}
 		}
-		// Allow host to pre-open relay even before next heartbeat
+		// Allow session owner to pre-open relay before first heartbeat if unclaimed
 		return "host", true
 	}
 

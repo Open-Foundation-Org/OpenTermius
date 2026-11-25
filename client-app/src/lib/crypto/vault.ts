@@ -3,6 +3,36 @@
 const KEY_PROMISE_CACHE = new Map<string, Promise<CryptoKey>>();
 const FALLBACK_SECRET_KEY = 'opentermius-e2ee-default-vault-secret';
 const APP_SALT = new TextEncoder().encode('OpenTermius-E2EE-Salt-v1');
+const MASTER_PASSPHRASE_STORAGE_KEY = 'opentermius_master_passphrase';
+
+export function generateRandomVaultKey(): string {
+  const bytes = new Uint8Array(32);
+  window.crypto.getRandomValues(bytes);
+  return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+export function getMasterPassphrase(): string {
+  if (typeof window === 'undefined') return '';
+  return localStorage.getItem(MASTER_PASSPHRASE_STORAGE_KEY)?.trim() || '';
+}
+
+export function setMasterPassphrase(passphrase: string): void {
+  if (typeof window === 'undefined') return;
+  const trimmed = passphrase.trim();
+  if (trimmed) {
+    localStorage.setItem(MASTER_PASSPHRASE_STORAGE_KEY, trimmed);
+  } else {
+    localStorage.removeItem(MASTER_PASSPHRASE_STORAGE_KEY);
+  }
+  KEY_PROMISE_CACHE.clear();
+}
+
+function buildEffectiveSecret(vaultSecret?: string, includeMasterPassphrase = true): string {
+  const base = vaultSecret?.trim() || FALLBACK_SECRET_KEY;
+  if (!includeMasterPassphrase) return base;
+  const master = getMasterPassphrase();
+  return master ? `${base}::${master}` : base;
+}
 
 export async function deriveKeyFromPassword(password: string, salt: Uint8Array): Promise<CryptoKey> {
   const enc = new TextEncoder();
@@ -28,9 +58,9 @@ export async function deriveKeyFromPassword(password: string, salt: Uint8Array):
   );
 }
 
-async function getCachedVaultKey(vaultSecret?: string): Promise<CryptoKey | null> {
+async function getCachedVaultKey(vaultSecret?: string, includeMasterPassphrase = true): Promise<CryptoKey | null> {
   if (typeof window === 'undefined' || !window.crypto?.subtle) return null;
-  const secret = vaultSecret?.trim() || FALLBACK_SECRET_KEY;
+  const secret = buildEffectiveSecret(vaultSecret, includeMasterPassphrase);
   let promise = KEY_PROMISE_CACHE.get(secret);
   if (!promise) {
     promise = deriveKeyFromPassword(secret, APP_SALT).catch((err) => {
@@ -110,16 +140,24 @@ export async function decryptVaultPayload<T>(
 ): Promise<T | null> {
   if (!ciphertextBase64) return null;
 
-  const key = await getCachedVaultKey(vaultSecret);
+  const key = await getCachedVaultKey(vaultSecret, true);
   if (key && nonceBase64) {
     try {
       return await decryptVaultItem<T>(ciphertextBase64, nonceBase64, key);
     } catch {
-      // Fallback to default secret or legacy Base64 JSON below
+      // Fallback to raw vaultSecret (without master passphrase) or default secret below
+    }
+    if (getMasterPassphrase()) {
+      try {
+        const rawVaultKey = await getCachedVaultKey(vaultSecret, false);
+        if (rawVaultKey) return await decryptVaultItem<T>(ciphertextBase64, nonceBase64, rawVaultKey);
+      } catch {
+        // Continue fallback chain
+      }
     }
     if (vaultSecret && vaultSecret !== FALLBACK_SECRET_KEY) {
       try {
-        const defaultKey = await getCachedVaultKey(FALLBACK_SECRET_KEY);
+        const defaultKey = await getCachedVaultKey(FALLBACK_SECRET_KEY, false);
         if (defaultKey) return await decryptVaultItem<T>(ciphertextBase64, nonceBase64, defaultKey);
       } catch {
         // Fallback to legacy Base64 JSON below

@@ -328,12 +328,15 @@ class ApiClient {
     let gwVaults = await this.request<ApiVault[]>('/vaults');
     let personalVault = gwVaults.find((v) => v.type === 'personal') ?? gwVaults[0];
     if (!personalVault) {
+      const randBytes = new Uint8Array(32);
+      window.crypto.getRandomValues(randBytes);
+      const randHex = Array.from(randBytes, (b) => b.toString(16).padStart(2, '0')).join('');
       personalVault = await this.request<ApiVault>('/vaults', {
         method: 'POST',
         body: JSON.stringify({
           name: 'Personal Cloud Vault',
           type: 'personal',
-          encrypted_key: 'initial-master-vault-key-aes-256'
+          encrypted_key: randHex
         })
       });
     }
@@ -564,12 +567,15 @@ class ApiClient {
           return JSON.parse(raw);
         } catch {}
       }
+      const localKeyBytes = new Uint8Array(32);
+      window.crypto.getRandomValues(localKeyBytes);
+      const localKeyHex = Array.from(localKeyBytes, (b) => b.toString(16).padStart(2, '0')).join('');
       const initialVault: ApiVault = {
         id: 'local-vault-primary',
         owner_id: 'standalone-local-user',
         name: 'Local Standalone Vault',
         type: 'personal',
-        encrypted_key: 'local-master-vault-key-aes-256',
+        encrypted_key: localKeyHex,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString()
       };

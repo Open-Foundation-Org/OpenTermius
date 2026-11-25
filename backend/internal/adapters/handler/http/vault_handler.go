@@ -288,7 +288,11 @@ func (h *VaultHandler) InviteMember(w http.ResponseWriter, r *http.Request) {
 	member, err := h.vaultService.InviteMember(r.Context(), uid, vaultID, req.Email, domain.VaultRole(req.Role))
 	if err != nil {
 		if errors.Is(err, domain.ErrForbidden) {
-			writeJSONError(w, http.StatusForbidden, "only vault owner or admin can invite members")
+			writeJSONError(w, http.StatusForbidden, "insufficient permissions to invite member with this role")
+			return
+		}
+		if errors.Is(err, domain.ErrInvalidInput) {
+			writeJSONError(w, http.StatusBadRequest, "role must be owner, admin, or member")
 			return
 		}
 		if errors.Is(err, domain.ErrNotFound) {

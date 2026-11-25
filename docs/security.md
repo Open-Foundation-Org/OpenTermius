@@ -58,8 +58,8 @@ All encryption and decryption occurs in client memory using WebCrypto APIs (`win
 ## 4. Anti-Vulnerability Verification Checklist
 
 - [x] **No SQL Injection:** All queries use `$1, $2` parameters via `pgx`.
-- [x] **No IDOR (Insecure Direct Object Reference):** Every vault item query explicitly joins or filters against `vault_id` and user membership (`vault_members`).
-- [x] **No Hardcoded Secrets:** Zero hardcoded API keys, secrets, or default passwords.
-- [x] **CSRF / CORS Protection:** Explicit origin validation (`CORS_ALLOWED_ORIGINS`) for both REST API endpoints and WebSocket relay (`CollabHandler.SetAllowedOrigins`).
-- [x] **Rate Limiting:** Authentication & invite endpoints are rate-limited (`ipRateLimiter` with bounded memory eviction sweep) to prevent brute-force attacks.
+- [x] **No IDOR / Presence Leak / Relay Hijack:** Every vault item and presence query filters strictly by caller membership (`vault_members`) or ownership, Team Vault `member` role is prevented from deleting/moving shared items or escalating roles, and WebSocket `RelayWS` verifies session ownership before allowing `role=host`.
+- [x] **Cryptographic Vault Keys & Optional Client Master Passphrase:** New vaults generate 256-bit CSPRNG keys (`crypto/rand` & `crypto.getRandomValues`) and support local-only client Master Passphrase derivation (`opentermius_master_passphrase`).
+- [x] **CSRF / CORS & Content-Security-Policy:** Explicit origin validation (`CORS_ALLOWED_ORIGINS`) for REST and WebSocket relay, plus strict WebView CSP in `tauri.conf.json`.
+- [x] **Anti-Spoof Rate Limiting, Request Size Caps & Fail-Closed STARTTLS:** `clientIP` trusts forwarding headers only from loopback/private proxies, request bodies (`4 MiB`) and WebSocket frames (`1 MiB`) are bounded, invite redemption is atomic (`WHERE used_at IS NULL`), and `SMTPMailer` refuses STARTTLS downgrade when `use_tls` is enabled.
 - [x] **SSH Host Key Verification (TOFU):** Native Rust `russh` client verifies and persists server host key fingerprints (`.opentermius_known_hosts.json` across macOS, Linux, Windows, and Android) on first connection, distinguishes network errors from `HOST_KEY_MISMATCH`, and requires explicit user action (`ssh_trust_host_key` / "Trust New Key") to rotate a changed server key.

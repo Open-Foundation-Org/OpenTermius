@@ -80,11 +80,14 @@ func (m *SMTPMailer) Send(cfg *domain.SMTPSettings, toEmail, subject, plainBody 
 			return fmt.Errorf("SMTP client init failed: %w", err)
 		}
 		if cfg.UseTLS {
-			if ok, _ := client.Extension("STARTTLS"); ok {
-				if err := client.StartTLS(&tls.Config{ServerName: host, MinVersion: tls.VersionTLS12}); err != nil {
-					_ = client.Close()
-					return fmt.Errorf("SMTP STARTTLS failed: %w", err)
-				}
+			ok, _ := client.Extension("STARTTLS")
+			if !ok {
+				_ = client.Close()
+				return fmt.Errorf("SMTP server does not support STARTTLS (refusing cleartext downgrade)")
+			}
+			if err := client.StartTLS(&tls.Config{ServerName: host, MinVersion: tls.VersionTLS12}); err != nil {
+				_ = client.Close()
+				return fmt.Errorf("SMTP STARTTLS failed: %w", err)
 			}
 		}
 	}

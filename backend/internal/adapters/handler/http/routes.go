@@ -206,16 +206,37 @@ func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
+	if req.Body != nil && !strings.EqualFold(req.Header.Get("Upgrade"), "websocket") {
+		req.Body = http.MaxBytesReader(w, req.Body, 4<<20) // 4 MiB max request body
+	}
+
 	r.mux.ServeHTTP(w, req)
 }
 
 func clientIP(req *http.Request) string {
-	if xff := req.Header.Get("X-Forwarded-For"); xff != "" {
-		return strings.TrimSpace(strings.Split(xff, ",")[0])
-	}
 	host, _, err := net.SplitHostPort(req.RemoteAddr)
 	if err != nil {
-		return req.RemoteAddr
+		host = req.RemoteAddr
+	}
+	remoteIP := net.ParseIP(host)
+	// Only trust proxy forwarding headers when connection originates from loopback or private proxy network
+	if remoteIP != nil && (remoteIP.IsLoopback() || remoteIP.IsPrivate()) {
+		if xri := strings.TrimSpace(req.Header.Get("X-Real-IP")); xri != "" {
+			if parsed := net.ParseIP(xri); parsed != nil {
+				return parsed.String()
+			}
+		}
+		if xff := req.Header.Get("X-Forwarded-For"); xff != "" {
+			parts := strings.Split(xff, ",")
+			for i := len(parts) - 1; i >= 0; i-- {
+				candidate := strings.TrimSpace(parts[i])
+				if parsed := net.ParseIP(candidate); parsed != nil {
+					if i == 0 || (!parsed.IsLoopback() && !parsed.IsPrivate()) {
+						return parsed.String()
+					}
+				}
+			}
+		}
 	}
 	return host
 }

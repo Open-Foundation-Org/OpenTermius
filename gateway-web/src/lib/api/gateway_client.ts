@@ -301,12 +301,15 @@ class GatewayApiClient {
   }
 
   async createVault(name: string, type: 'personal' | 'team' = 'team'): Promise<GatewayVault> {
+    const bytes = new Uint8Array(32);
+    window.crypto.getRandomValues(bytes);
+    const randomKeyHex = Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
     return this.request<GatewayVault>('/vaults', {
       method: 'POST',
       body: JSON.stringify({
         name,
         type,
-        encrypted_key: `e2ee-wrapped-${type}-key-${Date.now()}`
+        encrypted_key: randomKeyHex
       })
     });
   }

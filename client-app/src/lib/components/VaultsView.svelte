@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { api, type ApiVault, type ApiVaultMember } from '../api/client';
+  import { generateRandomVaultKey } from '../crypto/vault';
   import { toast, formatErrorMessage } from '../stores/toast.svelte';
   import {
     FolderLock,
@@ -61,7 +62,7 @@
       const created = await api.createVault(
         newVaultName.trim(),
         'team',
-        'wrapped-team-vault-key-aes-256'
+        generateRandomVaultKey()
       );
       vaults.push(created);
       onVaultsUpdated?.([...vaults]);

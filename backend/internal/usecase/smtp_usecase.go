@@ -201,7 +201,7 @@ func (u *SMTPUseCase) VerifyInvite(ctx context.Context, rawToken string) (*domai
 }
 
 func (u *SMTPUseCase) AcceptInvite(ctx context.Context, rawToken, password string) (*domain.User, string, string, error) {
-	if len(password) < 8 {
+	if len(password) < 8 || len(password) > 72 {
 		return nil, "", "", domain.ErrInvalidInput
 	}
 	inv, err := u.VerifyInvite(ctx, rawToken)
@@ -209,11 +209,15 @@ func (u *SMTPUseCase) AcceptInvite(ctx context.Context, rawToken, password strin
 		return nil, "", "", err
 	}
 
+	if err := u.inviteRepo.MarkUsed(ctx, inv.ID); err != nil {
+		return nil, "", "", domain.ErrUnauthorized
+	}
+
 	user, accessToken, refreshToken, err := u.authUC.Register(ctx, inv.Email, password, inv.Name)
 	if err != nil {
+		_ = u.inviteRepo.MarkUnused(ctx, inv.ID)
 		return nil, "", "", err
 	}
-	_ = u.inviteRepo.MarkUsed(ctx, inv.ID)
 
 	return user, accessToken, refreshToken, nil
 }

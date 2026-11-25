@@ -36,7 +36,9 @@ func NewAuthUseCase(userRepo ports.UserRepository, jwtSecret string, tokenTTL, r
 }
 
 func (a *AuthUseCase) Register(ctx context.Context, email, password, name string) (*domain.User, string, string, error) {
-	if email == "" || password == "" || name == "" {
+	email = strings.ToLower(strings.TrimSpace(email))
+	name = strings.TrimSpace(name)
+	if email == "" || name == "" || len(password) < 8 || len(password) > 72 {
 		return nil, "", "", domain.ErrInvalidInput
 	}
 
@@ -72,6 +74,10 @@ func (a *AuthUseCase) Register(ctx context.Context, email, password, name string
 }
 
 func (a *AuthUseCase) Login(ctx context.Context, email, password string) (*domain.User, string, string, error) {
+	email = strings.ToLower(strings.TrimSpace(email))
+	if email == "" || password == "" || len(password) > 72 {
+		return nil, "", "", domain.ErrUnauthorized
+	}
 	user, err := a.userRepo.GetByEmail(ctx, email)
 	if err != nil {
 		return nil, "", "", domain.ErrUnauthorized
@@ -184,7 +190,7 @@ func (a *AuthUseCase) UpdateProfile(ctx context.Context, userID uuid.UUID, curre
 	}
 
 	if newPassword != "" {
-		if len(newPassword) < 8 {
+		if len(newPassword) < 8 || len(newPassword) > 72 {
 			return nil, domain.ErrInvalidInput
 		}
 		hash, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)

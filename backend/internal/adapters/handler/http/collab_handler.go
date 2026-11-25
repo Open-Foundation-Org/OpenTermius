@@ -247,9 +247,25 @@ func (h *CollabHandler) RelayWS(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		return
 	}
+	conn.SetReadLimit(1 << 20) // 1 MiB max WebSocket frame
 
 	peer := &relayPeer{conn: conn, userID: userID.String(), userName: userName, mode: mode}
 	room := h.getOrCreateRoom(sessionID)
+
+	if mode == "host" {
+		room.mu.RLock()
+		existingHost := room.host
+		room.mu.RUnlock()
+		if existingHost != nil && existingHost.userID != peer.userID {
+			_ = conn.WriteControl(
+				websocket.CloseMessage,
+				websocket.FormatCloseMessage(websocket.ClosePolicyViolation, "session already owned by another host"),
+				time.Now().Add(2*time.Second),
+			)
+			_ = conn.Close()
+			return
+		}
+	}
 
 	broadcastState := func() {
 		room.mu.RLock()

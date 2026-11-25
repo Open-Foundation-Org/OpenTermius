@@ -416,6 +416,19 @@ async fn terminal_open(
 
     let session_id_clone = config.session_id.clone();
     let app_clone = app.clone();
+    let sessions_arc = state.sessions.clone();
+
+    {
+        let mut sessions = state.sessions.lock().await;
+        sessions.insert(
+            config.session_id,
+            SessionHandle::LocalPty {
+                writer,
+                master: Arc::new(Mutex::new(pair.master)),
+                child: Arc::new(Mutex::new(child)),
+            },
+        );
+    }
 
     std::thread::spawn(move || {
         let mut buf = [0u8; 4096];
@@ -434,19 +447,12 @@ async fn terminal_open(
                 Err(_) => break,
             }
         }
+        tauri::async_runtime::block_on(async {
+            sessions_arc.lock().await.remove(&session_id_clone);
+        });
         let exit_event = format!("terminal-exit:{}", session_id_clone);
         let _ = app_clone.emit(&exit_event, ());
     });
-
-    let mut sessions = state.sessions.lock().await;
-    sessions.insert(
-        config.session_id,
-        SessionHandle::LocalPty {
-            writer,
-            master: Arc::new(Mutex::new(pair.master)),
-            child: Arc::new(Mutex::new(child)),
-        },
-    );
 
     Ok(())
 }
