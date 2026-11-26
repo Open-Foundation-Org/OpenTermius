@@ -476,9 +476,9 @@
       <div class="flex h-full flex-col items-center justify-center p-6 text-center text-xs text-neutral-500">
         {isPaneDragOver ? 'Drop here to transfer' : 'Empty directory'}
       </div>
-    {:else}
+    {:else if platform.isMobile}
       <!-- Mobile Touch File List -->
-      <div class="divide-y divide-[#171720] md:hidden">
+      <div class="divide-y divide-[#171720]">
         {#each filteredItems as item (item.path)}
           {@const Icon = getFileIcon(item)}
           {@const isSelected = selectedPaths.includes(item.path)}
@@ -537,9 +537,9 @@
           </div>
         {/each}
       </div>
-
+    {:else}
       <!-- Desktop File Table -->
-      <table class="hidden md:table w-full text-left border-collapse">
+      <table class="w-full text-left border-collapse">
         <thead class="sticky top-0 bg-[#121218] text-[10px] uppercase tracking-wider text-neutral-500 border-b border-[#1d1d27]">
           <tr>
             <th class="w-8 px-2.5 py-1.5"></th>

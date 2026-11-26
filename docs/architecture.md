@@ -131,8 +131,8 @@ opentermius/
 
 ### 6. Runtime Platform Detection & Adaptive UI (`platform.svelte.ts`)
 - **Reactive Platform Store (`client-app/src/lib/stores/platform.svelte.ts`)**:
-  - Uses Svelte 5 Runes (`$state`, `$derived`) to expose `platform.isMobile`, `platform.isTablet`, `platform.isDesktop`, `platform.isHandheld`, `platform.isAndroid`, `platform.isIOS`, `platform.isTouch`, and `platform.layoutMode`.
-  - Combines viewport breakpoints (`<768px` mobile, `768px-1024px` tablet, `>1024px` desktop) with `pointer: coarse` and User-Agent detection so handhelds get native touch ergonomics instead of cramped desktop web layouts.
+  - Uses Svelte 5 Runes (`$state`, `$derived`) to expose `platform.isNativeDesktop`, `platform.isMobile`, `platform.isTablet`, `platform.isDesktop`, `platform.isHandheld`, `platform.isAndroid`, `platform.isIOS`, `platform.isTouch`, and `platform.layoutMode`.
+  - Native desktop builds (Windows, macOS, Linux) and non-touch desktop browsers stay locked in `'desktop'` layout at all window sizes (including compact windowed or snapped half-screen modes with 125%–150% DPI scaling), while Android/iOS handhelds dynamically switch between `'mobile'` (`<768px`) and `'tablet'` (`768px–1180px`).
 - **Mobile Handheld (<768px / `platform.isMobile`)**:
   - **Native App Bar & Session Switcher**: Replaces desktop tab strip with a Material-style `h-14` top bar (drawer toggle, centered screen title or clickable terminal session pill opening a bottom-sheet session switcher, quick `+` shell button).
   - **Material 3 Bottom Navigation Bar (`h-16`)**: Thumb-friendly navigation (`Hosts`, `Terminal` with session badge, `SFTP`, `Tunnels`, `Menu`) with active pill indicator.

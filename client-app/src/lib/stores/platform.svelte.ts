@@ -22,8 +22,11 @@ class PlatformStore {
   isNativeTauri = $derived(
     typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window
   );
+  isNativeDesktop = $derived(this.isNativeTauri && !this.isAndroid && !this.isIOS);
 
   layoutMode = $derived.by<LayoutMode>(() => {
+    if (this.isNativeDesktop) return 'desktop';
+    if (!this.isAndroid && !this.isIOS && !this.isTouch) return 'desktop';
     if (this.width < 768) return 'mobile';
     if (this.width < 1024 || (this.isTouch && this.width <= 1180 && (this.isAndroid || this.isIOS))) {
       return 'tablet';

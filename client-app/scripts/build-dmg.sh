@@ -24,7 +24,7 @@ mkdir -p "$STAGING_DIR" "$DMG_DIR"
 
 ditto "$APP_DIR/$APP_NAME" "$STAGING_DIR/OpenTermius.app"
 xattr -cr "$STAGING_DIR/OpenTermius.app" || true
-codesign --force --deep --sign - "$STAGING_DIR/OpenTermius.app"
+codesign --force --deep --identifier "com.opentermius.client" --sign - "$STAGING_DIR/OpenTermius.app"
 codesign --verify --deep --strict "$STAGING_DIR/OpenTermius.app"
 ln -s /Applications "$STAGING_DIR/Applications"
 

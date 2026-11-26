@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { ScrollText, Clock, Server, RefreshCw, Trash2, Copy, Check, AlertCircle } from '@lucide/svelte';
+  import { platform } from '../stores/platform.svelte';
   import { toast, formatErrorMessage } from '../stores/toast.svelte';
 
   interface SessionLogItem {
@@ -126,9 +127,9 @@
         Open a terminal or connect to an SSH host to automatically log session activity.
       </p>
     </div>
-  {:else}
+  {:else if platform.isMobile}
     <!-- Mobile Card List -->
-    <div class="space-y-2.5 md:hidden">
+    <div class="space-y-2.5">
       {#each logs as log (log.id)}
         <div class="rounded-2xl border border-[#22222c] bg-[#14141c] p-3.5 space-y-2.5">
           <div class="flex items-start justify-between gap-2">
@@ -172,9 +173,9 @@
         </div>
       {/each}
     </div>
-
+  {:else}
     <!-- Desktop Table -->
-    <div class="hidden md:block rounded-xl border border-[#22222a] bg-[#14141a] overflow-hidden">
+    <div class="rounded-xl border border-[#22222a] bg-[#14141a] overflow-hidden">
       <table class="w-full text-left text-xs">
         <thead class="border-b border-[#22222a] bg-[#181822] text-neutral-400 font-semibold">
           <tr>

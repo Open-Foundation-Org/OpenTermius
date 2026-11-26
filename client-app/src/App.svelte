@@ -1278,38 +1278,36 @@
         class="flex h-11 items-center justify-between border-b border-[#1c1c25] bg-[#111116] pl-2.5 pr-2.5 sm:pl-3 sm:pr-3 shrink-0"
         style={platform.isMac && platform.isNativeTauri && (isSidebarCollapsed || !platform.isDesktop) ? 'padding-left: 84px;' : undefined}
       >
-        <!-- Left: Mobile Menu / Desktop Toggle + Tabs Bar -->
+        <!-- Left: Tablet Drawer / Desktop Sidebar Toggle + Tabs Bar -->
         <div class="flex items-center gap-1 overflow-x-auto no-scrollbar min-w-0">
-          <!-- Tablet / Half-Screen Drawer Toggle Button -->
-          <button
-            type="button"
-            onclick={() => {
-              isSidebarCollapsed = false;
-              isMobileMenuOpen = !isMobileMenuOpen;
-            }}
-            class="flex lg:hidden items-center justify-center rounded-lg p-1.5 text-neutral-400 hover:text-white hover:bg-[#1a1a24] transition mr-0.5 shrink-0 cursor-pointer"
-            aria-label="Toggle navigation menu"
-            title={platform.isMac ? 'Show Navigation (⌘B)' : 'Show Navigation (Ctrl+Shift+B)'}
-          >
-            <Menu class="h-4 w-4 text-emerald-400" />
-          </button>
-
-          <!-- Desktop Sidebar Toggle (Hide / Unhide) -->
-          <button
-            type="button"
-            onclick={() => (isSidebarCollapsed = !isSidebarCollapsed)}
-            class="hidden lg:flex items-center justify-center rounded-lg p-1.5 text-neutral-400 hover:text-white hover:bg-[#1a1a24] transition mr-1 shrink-0 cursor-pointer"
-            aria-label={isSidebarCollapsed ? 'Show Sidebar' : 'Hide Sidebar'}
-            title={isSidebarCollapsed
-              ? platform.isMac ? 'Show Sidebar (⌘B)' : 'Show Sidebar (Ctrl+Shift+B)'
-              : platform.isMac ? 'Hide Sidebar (⌘B)' : 'Hide Sidebar (Ctrl+Shift+B)'}
-          >
-            {#if isSidebarCollapsed}
-              <PanelLeftOpen class="h-4 w-4 text-emerald-400" />
-            {:else}
-              <PanelLeft class="h-4 w-4" />
-            {/if}
-          </button>
+          {#if !platform.isDesktop}
+            <!-- Tablet Drawer Toggle Button -->
+            <button
+              type="button"
+              onclick={() => (isMobileMenuOpen = !isMobileMenuOpen)}
+              class="flex items-center justify-center rounded-lg p-1.5 text-neutral-400 hover:text-white hover:bg-[#1a1a24] transition mr-0.5 shrink-0 cursor-pointer"
+              aria-label="Toggle navigation menu"
+            >
+              <Menu class="h-4 w-4 text-emerald-400" />
+            </button>
+          {:else}
+            <!-- Desktop Sidebar Toggle (Hide / Unhide) -->
+            <button
+              type="button"
+              onclick={() => (isSidebarCollapsed = !isSidebarCollapsed)}
+              class="flex items-center justify-center rounded-lg p-1.5 text-neutral-400 hover:text-white hover:bg-[#1a1a24] transition mr-1 shrink-0 cursor-pointer"
+              aria-label={isSidebarCollapsed ? 'Show Sidebar' : 'Hide Sidebar'}
+              title={isSidebarCollapsed
+                ? platform.isMac ? 'Show Sidebar (⌘B)' : 'Show Sidebar (Ctrl+Shift+B)'
+                : platform.isMac ? 'Hide Sidebar (⌘B)' : 'Hide Sidebar (Ctrl+Shift+B)'}
+            >
+              {#if isSidebarCollapsed}
+                <PanelLeftOpen class="h-4 w-4 text-emerald-400" />
+              {:else}
+                <PanelLeft class="h-4 w-4" />
+              {/if}
+            </button>
+          {/if}
 
           <button
             onclick={() => (activeNav = 'hosts')}

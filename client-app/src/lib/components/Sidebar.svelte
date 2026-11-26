@@ -84,9 +84,9 @@
   ];
 </script>
 
-{#if isMobileOpen}
+{#if isMobileOpen && !platform.isDesktop}
   <div
-    class="fixed inset-0 z-40 bg-black/70 backdrop-blur-xs lg:hidden animate-in fade-in duration-150"
+    class="fixed inset-0 z-40 bg-black/70 backdrop-blur-xs animate-in fade-in duration-150"
     onclick={onCloseMobile}
     role="button"
     tabindex="0"
@@ -97,14 +97,19 @@
 
 <aside
   class="flex h-full flex-col justify-between border-r border-white/[0.07] bg-[#0e0e11] select-none transition-all duration-200 ease-in-out shrink-0
-    fixed inset-y-0 left-0 z-50 w-68 p-3.5 pb-[calc(0.875rem+var(--sab))] shadow-2xl lg:relative lg:z-auto lg:shadow-none
-    {platform.isMac && platform.isNativeTauri ? 'lg:pt-9' : ''}
-    {isMobileOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}
-    {isCollapsed ? 'lg:w-0 lg:p-0 lg:border-r-0 lg:overflow-hidden lg:opacity-0 lg:pointer-events-none' : 'lg:w-56 lg:p-3 lg:pb-[calc(0.75rem+var(--sab))] lg:opacity-100'}
+    {platform.isDesktop
+      ? `relative z-auto shadow-none ${platform.isMac && platform.isNativeTauri ? 'pt-9' : ''} ${
+          isCollapsed
+            ? 'w-0 p-0 border-r-0 overflow-hidden opacity-0 pointer-events-none'
+            : 'w-48 lg:w-56 p-3 pb-[calc(0.75rem+var(--sab))] opacity-100'
+        }`
+      : `fixed inset-y-0 left-0 z-50 w-68 p-3.5 pb-[calc(0.875rem+var(--sab))] shadow-2xl ${
+          isMobileOpen ? 'translate-x-0' : '-translate-x-full'
+        }`}
   "
 >
-  {#if platform.isMac && platform.isNativeTauri}
-    <div data-tauri-drag-region class="hidden lg:block absolute top-0 left-0 right-0 h-8 z-10"></div>
+  {#if platform.isMac && platform.isNativeTauri && platform.isDesktop}
+    <div data-tauri-drag-region class="absolute top-0 left-0 right-0 h-8 z-10"></div>
   {/if}
 
   <div class="flex-1 min-h-0 overflow-y-auto no-scrollbar">
@@ -116,20 +121,20 @@
         </div>
         <span class="text-[13px] font-semibold tracking-tight text-zinc-100 truncate">OpenTermius</span>
       </div>
-      {#if isMobileOpen && onCloseMobile}
+      {#if !platform.isDesktop && isMobileOpen && onCloseMobile}
         <button
           type="button"
           onclick={onCloseMobile}
-          class="lg:hidden text-zinc-500 hover:text-zinc-200 p-1 rounded-md hover:bg-white/[0.05] transition shrink-0"
+          class="text-zinc-500 hover:text-zinc-200 p-1 rounded-md hover:bg-white/[0.05] transition shrink-0"
           aria-label="Close mobile sidebar"
         >
           <PanelLeftClose class="h-4 w-4" />
         </button>
-      {:else if onToggleCollapse}
+      {:else if platform.isDesktop && onToggleCollapse}
         <button
           type="button"
           onclick={onToggleCollapse}
-          class="hidden lg:block text-zinc-500 hover:text-zinc-200 p-1 rounded-md hover:bg-white/[0.05] transition shrink-0 cursor-pointer"
+          class="text-zinc-500 hover:text-zinc-200 p-1 rounded-md hover:bg-white/[0.05] transition shrink-0 cursor-pointer"
           title={platform.isMac ? 'Hide Sidebar (⌘B)' : 'Hide Sidebar (Ctrl+Shift+B)'}
         >
           <PanelLeftClose class="h-3.5 w-3.5" />

@@ -202,27 +202,60 @@ async fn establish_ssh_session(
     });
 
     let addr = (clean_host.as_str(), actual_port);
-    let key_mismatch = Arc::new(AtomicBool::new(false));
-    let handler = SshClientHandler {
-        host_port: format!("{}:{}", clean_host, actual_port),
-        key_mismatch: key_mismatch.clone(),
-    };
-    let mut session = tokio::time::timeout(
-        Duration::from_secs(15),
-        client::connect(config, addr, handler),
-    )
-    .await
-    .map_err(|_| format!("Connection timed out to {}:{}", clean_host, actual_port))?
-    .map_err(|e| {
-        if key_mismatch.load(Ordering::SeqCst) {
-            format!(
-                "HOST_KEY_MISMATCH:{}:{} — Server host key changed. Click 'Trust New Key' if this server was reinstalled.",
-                clean_host, actual_port
-            )
-        } else {
-            format!("SSH connection failed to {}:{}: {}", clean_host, actual_port, e)
+    let mut last_err = String::new();
+    let mut connected_session: Option<client::Handle<SshClientHandler>> = None;
+
+    for attempt in 0..3 {
+        let key_mismatch = Arc::new(AtomicBool::new(false));
+        let handler = SshClientHandler {
+            host_port: format!("{}:{}", clean_host, actual_port),
+            key_mismatch: key_mismatch.clone(),
+        };
+        let res = tokio::time::timeout(
+            Duration::from_secs(15),
+            client::connect(config.clone(), addr, handler),
+        )
+        .await;
+
+        match res {
+            Ok(Ok(s)) => {
+                connected_session = Some(s);
+                break;
+            }
+            Ok(Err(e)) => {
+                if key_mismatch.load(Ordering::SeqCst) {
+                    return Err(format!(
+                        "HOST_KEY_MISMATCH:{}:{} — Server host key changed. Click 'Trust New Key' if this server was reinstalled.",
+                        clean_host, actual_port
+                    ));
+                }
+                let err_str = e.to_string();
+                let is_route_or_arp = err_str.contains("os error 65")
+                    || err_str.to_lowercase().contains("no route to host")
+                    || err_str.to_lowercase().contains("hostunreachable");
+                if is_route_or_arp && attempt < 2 {
+                    tokio::time::sleep(Duration::from_millis(450)).await;
+                    continue;
+                }
+                #[cfg(target_os = "macos")]
+                if is_route_or_arp {
+                    last_err = format!(
+                        "SSH connection failed to {}:{}: {} (On macOS: check System Settings → Privacy & Security → Local Network → toggle OpenTermius OFF then ON)",
+                        clean_host, actual_port, err_str
+                    );
+                    break;
+                }
+                last_err = format!("SSH connection failed to {}:{}: {}", clean_host, actual_port, err_str);
+                break;
+            }
+            Err(_) => {
+                last_err = format!("Connection timed out to {}:{}", clean_host, actual_port);
+                break;
+            }
         }
-    })?;
+    }
+
+    let mut session = connected_session.ok_or(last_err)?;
 
     let user = if username.trim().is_empty() {
         "root"
