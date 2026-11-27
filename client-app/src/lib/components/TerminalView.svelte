@@ -631,6 +631,19 @@
       connectionState = 'connected';
       recordSessionLog();
     } catch (err: unknown) {
+      const rawMsg = err instanceof Error ? err.message : typeof err === 'string' ? err : '';
+      const prompt = toast.confirmHostKey(rawMsg);
+      if (prompt) {
+        const trusted = await prompt;
+        if (trusted) {
+          await handleTrustHostKey();
+          return;
+        }
+        connectionState = 'error';
+        errorMessage = 'Connection cancelled: host key was not trusted.';
+        term?.writeln('\r\n\x1b[1;33mHost key verification cancelled.\x1b[0m\r\n');
+        return;
+      }
       connectionState = 'error';
       errorMessage = formatErrorMessage(err, 'Failed to start terminal session');
       term?.writeln(`\r\n\x1b[1;31m● Connection error: ${errorMessage}\x1b[0m\r\n`);

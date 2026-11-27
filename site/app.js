@@ -1,5 +1,5 @@
 (function () {
-  const DEFAULT_VERSION = '0.7.0';
+  const DEFAULT_VERSION = '0.7.1';
   const REPO = 'Open-Foundation-Org/OpenTermius';
   const RELEASE_BASE = `https://github.com/${REPO}/releases/download/v${DEFAULT_VERSION}`;
 

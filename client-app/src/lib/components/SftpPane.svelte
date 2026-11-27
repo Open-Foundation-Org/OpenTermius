@@ -162,6 +162,18 @@
       onItemsLoaded?.(items);
       loadState = items.length === 0 ? 'empty' : 'success';
     } catch (err: unknown) {
+      const rawMsg = err instanceof Error ? err.message : typeof err === 'string' ? err : '';
+      const prompt = toast.confirmHostKey(rawMsg);
+      if (prompt) {
+        const trusted = await prompt;
+        if (trusted) {
+          await handleTrustHostKey();
+          return;
+        }
+        loadState = 'error';
+        errorMessage = 'Connection cancelled: host key was not trusted.';
+        return;
+      }
       loadState = 'error';
       errorMessage = formatErrorMessage(err, 'Failed to list directory');
     }

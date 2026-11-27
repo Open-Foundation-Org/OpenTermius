@@ -301,6 +301,36 @@
         toast.success(`Tunnel active on 127.0.0.1:${tunnel.localPort}`);
       }
     } catch (err: unknown) {
+      const rawMsg = err instanceof Error ? err.message : typeof err === 'string' ? err : '';
+      const prompt = toast.confirmHostKey(rawMsg);
+      if (prompt) {
+        const trusted = await prompt;
+        if (trusted) {
+          const targetHost = hosts.find((h) => h.id === tunnel.hostId);
+          if (targetHost) {
+            try {
+              const { invoke } = await import('@tauri-apps/api/core');
+              await invoke('ssh_trust_host_key', { host: targetHost.address, port: targetHost.port ?? 22 });
+              await api.tunnelStart({
+                tunnelId: tunnel.id,
+                tunnelType: tunnel.type,
+                localPort: tunnel.localPort,
+                remoteHost: tunnel.remoteHost,
+                remotePort: tunnel.remotePort,
+                host: targetHost
+              });
+              tunnels = tunnels.map((t) => (t.id === tunnel.id ? { ...t, isActive: true } : t));
+              toast.success(`Tunnel active on 127.0.0.1:${tunnel.localPort}`);
+              return;
+            } catch (retryErr: unknown) {
+              toast.error(formatErrorMessage(retryErr, 'Failed to start SSH tunnel'));
+              return;
+            }
+          }
+        }
+        toast.info('Tunnel cancelled: host key was not trusted.');
+        return;
+      }
       toast.error(formatErrorMessage(err, 'Failed to toggle SSH tunnel'));
     } finally {
       togglingId = null;

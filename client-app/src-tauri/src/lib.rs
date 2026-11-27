@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, UNIX_EPOCH};
 
@@ -15,6 +14,31 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 
 static KNOWN_HOSTS: OnceLock<Mutex<HashMap<String, String>>> = OnceLock::new();
+static PENDING_HOST_KEYS: OnceLock<Mutex<HashMap<String, String>>> = OnceLock::new();
+
+fn pending_host_keys_map() -> &'static Mutex<HashMap<String, String>> {
+    PENDING_HOST_KEYS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn extract_host_key_info(pk: &PublicKeyOrCertificate) -> (String, String) {
+    match pk {
+        PublicKeyOrCertificate::PublicKey { key, .. } => {
+            let algo = match key.algorithm() {
+                ssh_key::Algorithm::Ed25519 => "ED25519".to_string(),
+                ssh_key::Algorithm::Rsa { .. } => "RSA".to_string(),
+                ssh_key::Algorithm::Ecdsa { .. } => "ECDSA".to_string(),
+                other => other.as_str().to_uppercase(),
+            };
+            let fp = key.fingerprint(ssh_key::HashAlg::Sha256).to_string();
+            (algo, fp)
+        }
+        PublicKeyOrCertificate::Certificate(cert) => {
+            let pub_key = ssh_key::PublicKey::from(cert.public_key().clone());
+            let fp = pub_key.fingerprint(ssh_key::HashAlg::Sha256).to_string();
+            ("CERT".to_string(), fp)
+        }
+    }
+}
 
 fn user_home_dir() -> Option<PathBuf> {
     std::env::var("HOME")
@@ -48,18 +72,22 @@ fn persist_known_hosts(map: &HashMap<String, String>) {
     }
 }
 
-fn verify_or_record_host_key(host_port: &str, key_repr: &str) -> bool {
-    let Ok(mut map) = known_hosts_map().lock() else {
-        return true;
+enum HostKeyCheck {
+    Trusted,
+    Unknown,
+    Mismatch,
+}
+
+fn check_known_host(host_port: &str, key_repr: &str) -> HostKeyCheck {
+    let Ok(map) = known_hosts_map().lock() else {
+        return HostKeyCheck::Trusted;
     };
 
-    if let Some(existing) = map.get(host_port) {
-        return existing == key_repr;
+    match map.get(host_port) {
+        Some(existing) if existing == key_repr => HostKeyCheck::Trusted,
+        Some(_) => HostKeyCheck::Mismatch,
+        None => HostKeyCheck::Unknown,
     }
-
-    map.insert(host_port.to_string(), key_repr.to_string());
-    persist_known_hosts(&map);
-    true
 }
 
 fn normalize_host_port(raw_host: &str, default_port: u16) -> (String, u16) {
@@ -119,7 +147,7 @@ fn drain_utf8_chunk(pending: &mut Vec<u8>, incoming: &[u8]) -> String {
 
 struct SshClientHandler {
     host_port: String,
-    key_mismatch: Arc<AtomicBool>,
+    key_status: Arc<Mutex<Option<(String, String, String)>>>,
 }
 
 impl client::Handler for SshClientHandler {
@@ -130,11 +158,29 @@ impl client::Handler for SshClientHandler {
         server_public_key: &PublicKeyOrCertificate,
     ) -> Result<bool, Self::Error> {
         let key_repr = format!("{:?}", server_public_key);
-        let ok = verify_or_record_host_key(&self.host_port, &key_repr);
-        if !ok {
-            self.key_mismatch.store(true, Ordering::SeqCst);
+        match check_known_host(&self.host_port, &key_repr) {
+            HostKeyCheck::Trusted => Ok(true),
+            HostKeyCheck::Unknown => {
+                let (algo, fp) = extract_host_key_info(server_public_key);
+                if let Ok(mut pending) = pending_host_keys_map().lock() {
+                    pending.insert(self.host_port.clone(), key_repr);
+                }
+                if let Ok(mut st) = self.key_status.lock() {
+                    *st = Some(("HOST_KEY_UNKNOWN".to_string(), algo, fp));
+                }
+                Ok(false)
+            }
+            HostKeyCheck::Mismatch => {
+                let (algo, fp) = extract_host_key_info(server_public_key);
+                if let Ok(mut pending) = pending_host_keys_map().lock() {
+                    pending.insert(self.host_port.clone(), key_repr);
+                }
+                if let Ok(mut st) = self.key_status.lock() {
+                    *st = Some(("HOST_KEY_MISMATCH".to_string(), algo, fp));
+                }
+                Ok(false)
+            }
         }
-        Ok(ok)
     }
 }
 
@@ -146,8 +192,17 @@ async fn ssh_trust_host_key(
 ) -> Result<(), String> {
     let (clean_host, actual_port) = normalize_host_port(&host, port.unwrap_or(22));
     let key = format!("{}:{}", clean_host, actual_port);
+    let pending_repr = pending_host_keys_map()
+        .lock()
+        .ok()
+        .and_then(|mut p| p.remove(&key));
+
     if let Ok(mut map) = known_hosts_map().lock() {
-        map.remove(&key);
+        if let Some(repr) = pending_repr {
+            map.insert(key.clone(), repr);
+        } else {
+            map.remove(&key);
+        }
         persist_known_hosts(&map);
     }
     let prefix = format!("{}:", key);
@@ -207,10 +262,10 @@ async fn establish_ssh_session(
     let mut connected_session: Option<client::Handle<SshClientHandler>> = None;
 
     for attempt in 0..3 {
-        let key_mismatch = Arc::new(AtomicBool::new(false));
+        let key_status = Arc::new(Mutex::new(None));
         let handler = SshClientHandler {
             host_port: format!("{}:{}", clean_host, actual_port),
-            key_mismatch: key_mismatch.clone(),
+            key_status: key_status.clone(),
         };
         let res = tokio::time::timeout(
             Duration::from_secs(15),
@@ -224,11 +279,10 @@ async fn establish_ssh_session(
                 break;
             }
             Ok(Err(e)) => {
-                if key_mismatch.load(Ordering::SeqCst) {
-                    return Err(format!(
-                        "HOST_KEY_MISMATCH:{}:{} — Server host key changed. Click 'Trust New Key' if this server was reinstalled.",
-                        clean_host, actual_port
-                    ));
+                if let Ok(guard) = key_status.lock() {
+                    if let Some((kind, algo, fp)) = guard.as_ref() {
+                        return Err(format!("{}|{}|{}|{}|{}", kind, clean_host, actual_port, algo, fp));
+                    }
                 }
                 let err_str = e.to_string();
                 let is_route_or_arp = err_str.contains("os error 65")

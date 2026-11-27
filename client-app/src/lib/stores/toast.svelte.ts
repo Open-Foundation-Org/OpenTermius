@@ -58,6 +58,14 @@ class ToastStore {
     confirmLabel: string;
     resolve: (value: boolean) => void;
   } | null>(null);
+  hostKeyRequest = $state<{
+    kind: 'unknown' | 'mismatch';
+    host: string;
+    port: number;
+    algo: string;
+    fingerprint: string;
+    resolve: (value: boolean) => void;
+  } | null>(null);
   private nextId = 1;
 
   confirm(message: string, confirmLabel = 'Delete'): Promise<boolean> {
@@ -72,6 +80,30 @@ class ToastStore {
   resolveConfirm(value: boolean) {
     const req = this.confirmRequest;
     this.confirmRequest = null;
+    req?.resolve(value);
+  }
+
+  confirmHostKey(rawError: string): Promise<boolean> | null {
+    const match = rawError.match(/^(HOST_KEY_UNKNOWN|HOST_KEY_MISMATCH)\|([^|]+)\|(\d+)\|([^|]+)\|([^\s|]+)/);
+    if (!match) return null;
+    if (this.hostKeyRequest) {
+      this.hostKeyRequest.resolve(false);
+    }
+    return new Promise((resolve) => {
+      this.hostKeyRequest = {
+        kind: match[1] === 'HOST_KEY_MISMATCH' ? 'mismatch' : 'unknown',
+        host: match[2],
+        port: Number(match[3]) || 22,
+        algo: match[4],
+        fingerprint: match[5],
+        resolve
+      };
+    });
+  }
+
+  resolveHostKey(value: boolean) {
+    const req = this.hostKeyRequest;
+    this.hostKeyRequest = null;
     req?.resolve(value);
   }
 
