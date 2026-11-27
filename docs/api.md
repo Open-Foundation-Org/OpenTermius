@@ -148,6 +148,7 @@ This document serves as the single source of truth for all OpenTermius Gateway R
 | `POST` | `/api/v1/sessions/:sessionId/request` | Request remote view/control access (auto-reuses existing approval for the same session/user) |
 | `GET` | `/api/v1/sessions/requests/:requestId` | Poll approval status of an outbound remote access request |
 | `POST` | `/api/v1/sessions/requests/:requestId/respond` | Approve (`view` or `control`) or reject an incoming remote access request |
-| `GET` | `/api/v1/relay/:sessionId?token=...&role=host\|viewer&request_id=...` | WebSocket Binary Relay forwarding PTY frames + `relay_state` participant avatars & throttled `typing` indicators |
+| `POST` | `/api/v1/relay/:sessionId/ticket` | Issue a 20-second single-use ephemeral WebSocket ticket bound to `sessionId`, `userId`, and approved `mode` |
+| `GET` | `/api/v1/relay/:sessionId?ticket=...` | E2EE WebSocket Binary Relay (`AES-256-GCM` client-encrypted PTY frames + `relay_state` participant avatars & throttled `typing` indicators) |
 
 

@@ -173,6 +173,77 @@ export async function decryptVaultPayload<T>(
   }
 }
 
+// Binary frame header magic (2 bytes: 0x4F 0x54 = "OT") + 12-byte AES-GCM IV + ciphertext+tag
+const E2EE_FRAME_MAGIC_0 = 0x4f;
+const E2EE_FRAME_MAGIC_1 = 0x54;
+
+export async function encryptRelayFrame(
+  plainBytes: Uint8Array,
+  vaultSecret?: string
+): Promise<Uint8Array> {
+  // Always use the shared team vault secret (without device-local master passphrase) so teammates can decrypt
+  const key = await getCachedVaultKey(vaultSecret, false);
+  if (!key) return plainBytes;
+
+  const iv = window.crypto.getRandomValues(new Uint8Array(12));
+  const encryptedBuffer = await window.crypto.subtle.encrypt(
+    { name: 'AES-GCM', iv },
+    key,
+    plainBytes as BufferSource
+  );
+  const cipherBytes = new Uint8Array(encryptedBuffer);
+  const frame = new Uint8Array(2 + 12 + cipherBytes.byteLength);
+  frame[0] = E2EE_FRAME_MAGIC_0;
+  frame[1] = E2EE_FRAME_MAGIC_1;
+  frame.set(iv, 2);
+  frame.set(cipherBytes, 14);
+  return frame;
+}
+
+export async function decryptRelayFrame(
+  frameBytes: Uint8Array,
+  vaultSecret?: string
+): Promise<Uint8Array> {
+  if (
+    frameBytes.byteLength <= 14 + 16 ||
+    frameBytes[0] !== E2EE_FRAME_MAGIC_0 ||
+    frameBytes[1] !== E2EE_FRAME_MAGIC_1
+  ) {
+    return frameBytes;
+  }
+
+  const key = await getCachedVaultKey(vaultSecret, false);
+  if (!key) return frameBytes;
+
+  const iv = frameBytes.subarray(2, 14);
+  const cipherBytes = frameBytes.subarray(14);
+  try {
+    const decryptedBuffer = await window.crypto.subtle.decrypt(
+      { name: 'AES-GCM', iv: iv as BufferSource },
+      key,
+      cipherBytes as BufferSource
+    );
+    return new Uint8Array(decryptedBuffer);
+  } catch {
+    if (vaultSecret && vaultSecret !== FALLBACK_SECRET_KEY) {
+      try {
+        const fallbackKey = await getCachedVaultKey(FALLBACK_SECRET_KEY, false);
+        if (fallbackKey) {
+          const buf = await window.crypto.subtle.decrypt(
+            { name: 'AES-GCM', iv: iv as BufferSource },
+            fallbackKey,
+            cipherBytes as BufferSource
+          );
+          return new Uint8Array(buf);
+        }
+      } catch {
+        // drop undecryptable frame
+      }
+    }
+    return new Uint8Array(0);
+  }
+}
+
 function bufferToBase64(buffer: Uint8Array): string {
   let binary = '';
   for (let i = 0; i < buffer.byteLength; i++) {

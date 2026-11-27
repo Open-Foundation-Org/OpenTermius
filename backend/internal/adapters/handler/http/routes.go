@@ -187,6 +187,7 @@ func (r *Router) registerRoutes() {
 	r.mux.Handle("POST /api/v1/sessions/{sessionId}/request", r.authMiddleware(http.HandlerFunc(r.collabHandler.RequestRemote)))
 	r.mux.Handle("GET /api/v1/sessions/requests/{requestId}", r.authMiddleware(http.HandlerFunc(r.collabHandler.GetRequest)))
 	r.mux.Handle("POST /api/v1/sessions/requests/{requestId}/respond", r.authMiddleware(http.HandlerFunc(r.collabHandler.RespondRemote)))
+	r.mux.Handle("POST /api/v1/relay/{sessionId}/ticket", r.authMiddleware(http.HandlerFunc(r.collabHandler.CreateRelayTicket)))
 	r.mux.HandleFunc("GET /api/v1/relay/{sessionId}", r.collabHandler.RelayWS)
 }
 

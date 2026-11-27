@@ -728,7 +728,7 @@
       { vaultId: activeVault?.id, vaultName: activeVault?.name }
     );
     activeNav = 'terminal';
-    void runPresenceHeartbeat();
+    void runPresenceHeartbeat(true);
   }
 
   function handleNewLocalTab() {
@@ -816,15 +816,25 @@
     await loadHosts();
   }
 
-  async function runPresenceHeartbeat() {
+  let lastHeartbeatAt = 0;
+
+  async function runPresenceHeartbeat(force = false) {
     if (!isAuthenticated || api.isStandalone()) {
       gatewayOnline = false;
       teamPresence = [];
       return;
     }
-    if (typeof document !== 'undefined' && document.hidden && terminalStore.tabCount === 0) {
+    const isHidden = typeof document !== 'undefined' && document.hidden;
+    if (isHidden && terminalStore.tabCount === 0) {
       return;
     }
+    const now = Date.now();
+    // Adaptive heartbeat cadence: 10s when active sessions or viewing team vault; 25s when idle
+    const isIdle = !force && terminalStore.tabCount === 0 && activeVault?.type !== 'team';
+    if (isIdle && now - lastHeartbeatAt < 24000) {
+      return;
+    }
+    lastHeartbeatAt = now;
     const activeSessions = terminalStore.tabs
       .filter((t) => !t.remoteConfig)
       .map((t) => ({
@@ -1010,7 +1020,7 @@
     (window as any).AndroidClipboard?.setKeepAliveSessions?.(count);
   });
 
-  const APP_VERSION = '0.7.1';
+  const APP_VERSION = '0.7.2';
   type DesktopUpdate = Awaited<ReturnType<typeof import('@tauri-apps/plugin-updater').check>>;
   let availableUpdate = $state<DesktopUpdate | null>(null);
   let releaseFallback = $state<{ version: string; url: string } | null>(null);
@@ -1104,10 +1114,10 @@
     const heartbeatTimer = setInterval(runPresenceHeartbeat, 10000);
     const onFocus = () => {
       void silentBackgroundSync();
-      void runPresenceHeartbeat();
+      void runPresenceHeartbeat(true);
     };
     window.addEventListener('focus', onFocus);
-    void runPresenceHeartbeat();
+    void runPresenceHeartbeat(true);
 
     let lastBackMs = 0;
     const onAndroidBack = () => {
@@ -1928,6 +1938,7 @@
                       sessionId={tab.id}
                       title={tab.label}
                       hostId={tab.hostId}
+                      vaultId={tab.vaultId || activeVault?.id || ''}
                       config={tab.config}
                       remoteConfig={tab.remoteConfig}
                       active={activeNav === 'terminal' && tab.id === terminalStore.activeTabId}
@@ -1949,6 +1960,7 @@
                         sessionId={terminalStore.splitTab.id}
                         title={terminalStore.splitTab.label}
                         hostId={terminalStore.splitTab.hostId}
+                        vaultId={terminalStore.splitTab.vaultId || activeVault?.id || ''}
                         config={terminalStore.splitTab.config}
                         active={activeNav === 'terminal'}
                         isSplitPane={true}

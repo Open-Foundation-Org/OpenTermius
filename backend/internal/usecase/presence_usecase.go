@@ -2,6 +2,8 @@ package usecase
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"strings"
 	"sync"
 	"time"
@@ -10,6 +12,21 @@ import (
 	"github.com/opentermius/opentermius/internal/domain"
 	"github.com/opentermius/opentermius/internal/ports"
 )
+
+type cachedUserProfile struct {
+	name      string
+	email     string
+	role      string
+	expiresAt time.Time
+}
+
+type RelayTicket struct {
+	Token     string    `json:"ticket"`
+	SessionID string    `json:"session_id"`
+	UserID    uuid.UUID `json:"user_id"`
+	Mode      string    `json:"mode"` // "host" | "view" | "control"
+	ExpiresAt time.Time `json:"expires_at"`
+}
 
 type RelayParticipant struct {
 	UserID   string `json:"user_id"`
@@ -59,6 +76,8 @@ type PresenceUseCase struct {
 	devices        map[string]*DevicePresence    // key: userID:deviceID
 	requests       map[string]*RemoteRequest     // key: requestID
 	sessionViewers map[string][]RelayParticipant // key: sessionID
+	tickets        map[string]*RelayTicket       // key: random 32-byte hex ticket (20s TTL, one-time use)
+	userCache      map[uuid.UUID]cachedUserProfile
 	vaultRepo      ports.VaultRepository
 	userRepo       ports.UserRepository
 }
@@ -68,9 +87,47 @@ func NewPresenceUseCase(vaultRepo ports.VaultRepository, userRepo ports.UserRepo
 		devices:        make(map[string]*DevicePresence),
 		requests:       make(map[string]*RemoteRequest),
 		sessionViewers: make(map[string][]RelayParticipant),
+		tickets:        make(map[string]*RelayTicket),
+		userCache:      make(map[uuid.UUID]cachedUserProfile),
 		vaultRepo:      vaultRepo,
 		userRepo:       userRepo,
 	}
+}
+
+func (p *PresenceUseCase) getCachedUser(ctx context.Context, userID uuid.UUID) (name, email, role string) {
+	now := time.Now().UTC()
+	p.mu.RLock()
+	cached, ok := p.userCache[userID]
+	p.mu.RUnlock()
+	if ok && now.Before(cached.expiresAt) {
+		return cached.name, cached.email, cached.role
+	}
+
+	user, err := p.userRepo.GetByID(ctx, userID)
+	name = "Operator"
+	if err == nil && user != nil {
+		if user.Name != "" {
+			name = user.Name
+		}
+		email = user.Email
+		role = user.Role
+		p.mu.Lock()
+		if len(p.userCache) > 8192 {
+			for k, v := range p.userCache {
+				if now.After(v.expiresAt) {
+					delete(p.userCache, k)
+				}
+			}
+		}
+		p.userCache[userID] = cachedUserProfile{
+			name:      name,
+			email:     email,
+			role:      role,
+			expiresAt: now.Add(10 * time.Minute),
+		}
+		p.mu.Unlock()
+	}
+	return name, email, role
 }
 
 func (p *PresenceUseCase) SetSessionViewers(sessionID string, viewers []RelayParticipant) {
@@ -96,11 +153,8 @@ func (p *PresenceUseCase) RevokeSessionApprovals(sessionID string) {
 }
 
 func (p *PresenceUseCase) GetUserName(ctx context.Context, userID uuid.UUID) string {
-	user, err := p.userRepo.GetByID(ctx, userID)
-	if err == nil && user != nil && user.Name != "" {
-		return user.Name
-	}
-	return "Operator"
+	name, _, _ := p.getCachedUser(ctx, userID)
+	return name
 }
 
 func (p *PresenceUseCase) Heartbeat(
@@ -109,13 +163,7 @@ func (p *PresenceUseCase) Heartbeat(
 	deviceID, deviceName, platform string,
 	sessions []ActiveSessionInfo,
 ) ([]RemoteRequest, error) {
-	user, err := p.userRepo.GetByID(ctx, userID)
-	userName := "Operator"
-	userEmail := ""
-	if err == nil && user != nil {
-		userName = user.Name
-		userEmail = user.Email
-	}
+	userName, userEmail, _ := p.getCachedUser(ctx, userID)
 
 	if deviceID == "" {
 		deviceID = userID.String()
@@ -184,7 +232,8 @@ func (p *PresenceUseCase) ListPresence(ctx context.Context, callerID uuid.UUID, 
 			return nil, domain.ErrForbidden
 		}
 	} else {
-		if caller, err := p.userRepo.GetByID(ctx, callerID); err == nil && caller != nil && strings.EqualFold(caller.Role, "admin") {
+		_, _, callerRole := p.getCachedUser(ctx, callerID)
+		if strings.EqualFold(callerRole, "admin") {
 			isAdmin = true
 		} else {
 			allowedVaults = make(map[string]bool)
@@ -314,12 +363,9 @@ func (p *PresenceUseCase) RequestRemote(ctx context.Context, requesterID uuid.UU
 	}
 	p.mu.RUnlock()
 
-	reqUser, err := p.userRepo.GetByID(ctx, requesterID)
-	reqName := "Teammate"
-	reqEmail := ""
-	if err == nil && reqUser != nil {
-		reqName = reqUser.Name
-		reqEmail = reqUser.Email
+	reqName, reqEmail, _ := p.getCachedUser(ctx, requesterID)
+	if reqName == "" {
+		reqName = "Teammate"
 	}
 
 	req := &RemoteRequest{
@@ -408,4 +454,61 @@ func (p *PresenceUseCase) ValidateRelayJoin(sessionID string, userID uuid.UUID, 
 		return "", false
 	}
 	return req.Mode, true
+}
+
+func (p *PresenceUseCase) IssueRelayTicket(sessionID string, userID uuid.UUID, role, requestID string) (*RelayTicket, error) {
+	if role != "host" {
+		role = "viewer"
+	}
+	mode, allowed := p.ValidateRelayJoin(sessionID, userID, role, requestID)
+	if !allowed {
+		return nil, domain.ErrForbidden
+	}
+
+	raw := make([]byte, 32)
+	if _, err := rand.Read(raw); err != nil {
+		return nil, err
+	}
+	token := hex.EncodeToString(raw)
+	now := time.Now().UTC()
+	ticket := &RelayTicket{
+		Token:     token,
+		SessionID: sessionID,
+		UserID:    userID,
+		Mode:      mode,
+		ExpiresAt: now.Add(20 * time.Second),
+	}
+
+	p.mu.Lock()
+	for k, t := range p.tickets {
+		if now.After(t.ExpiresAt) {
+			delete(p.tickets, k)
+		}
+	}
+	p.tickets[token] = ticket
+	p.mu.Unlock()
+
+	return ticket, nil
+}
+
+func (p *PresenceUseCase) RedeemRelayTicket(sessionID, token string) (userID uuid.UUID, mode string, ok bool) {
+	if sessionID == "" || token == "" {
+		return uuid.Nil, "", false
+	}
+	now := time.Now().UTC()
+
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	ticket, exists := p.tickets[token]
+	if !exists {
+		return uuid.Nil, "", false
+	}
+	// Single-use: always delete upon redemption attempt
+	delete(p.tickets, token)
+
+	if ticket.SessionID != sessionID || now.After(ticket.ExpiresAt) {
+		return uuid.Nil, "", false
+	}
+	return ticket.UserID, ticket.Mode, true
 }

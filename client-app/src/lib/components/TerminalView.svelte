@@ -4,6 +4,7 @@
   import { FitAddon } from '@xterm/addon-fit';
   import { terminalStore, type TerminalHostConfig, type RemoteViewerConfig } from '../stores/terminal.svelte';
   import { api, type RelayParticipant } from '../api/client';
+  import { encryptRelayFrame, decryptRelayFrame } from '../crypto/vault';
   import { platform } from '../stores/platform.svelte';
   import { toast, formatErrorMessage } from '../stores/toast.svelte';
   import {
@@ -25,6 +26,7 @@
     title: string;
     sessionId?: string;
     hostId: string;
+    vaultId?: string;
     config?: TerminalHostConfig;
     remoteConfig?: RemoteViewerConfig;
     active?: boolean;
@@ -40,6 +42,7 @@
     title = 'Active Terminal Session',
     sessionId = '',
     hostId,
+    vaultId = '',
     config,
     remoteConfig,
     active = true,
@@ -99,7 +102,37 @@
   let relayEndedByHost = false;
   const relayEncoder = new TextEncoder();
   const relayDecoder = new TextDecoder();
+  let relaySendChain: Promise<void> = Promise.resolve();
+  let relayRecvChain: Promise<void> = Promise.resolve();
   let sessionStartMs = 0;
+
+  function queueEncryptedRelaySend(rawText: string) {
+    const secret = api.getVaultSecret(vaultId);
+    const plainBytes = relayEncoder.encode(rawText);
+    relaySendChain = relaySendChain
+      .then(async () => {
+        if (!relayWs || relayWs.readyState !== WebSocket.OPEN) return;
+        const frame = await encryptRelayFrame(plainBytes, secret);
+        if (relayWs && relayWs.readyState === WebSocket.OPEN) {
+          relayWs.send(frame);
+        }
+      })
+      .catch(() => {});
+  }
+
+  function queueDecryptedRelayReceive(buf: ArrayBuffer, onPlainText: (text: string) => void) {
+    const secret = api.getVaultSecret(vaultId);
+    const rawBytes = new Uint8Array(buf);
+    relayRecvChain = relayRecvChain
+      .then(async () => {
+        const plainBytes = await decryptRelayFrame(rawBytes, secret);
+        if (plainBytes.byteLength > 0) {
+          const text = relayDecoder.decode(plainBytes);
+          if (text) onPlainText(text);
+        }
+      })
+      .catch(() => {});
+  }
 
   function safeFit() {
     if (!active || !terminalContainer || !fitAddon || !term) return;
@@ -187,14 +220,15 @@
     typingUsers = [];
   }
 
-  function startHostRelay() {
+  async function startHostRelay() {
     if (remoteConfig || (relayWs && relayWs.readyState <= WebSocket.OPEN)) return;
-    const url = api.getRelayWsUrl(activeSessionId, 'host');
+    const url = await api.resolveRelayWsUrl(activeSessionId, 'host');
+    if (remoteConfig || (relayWs && relayWs.readyState <= WebSocket.OPEN)) return;
     const ws = new WebSocket(url);
     ws.binaryType = 'arraybuffer';
     ws.onopen = () => {
       isRelaySharing = true;
-      toast.success('Remote relay active');
+      toast.success('Remote relay active (E2EE)');
     };
     ws.onmessage = (ev) => {
       if (typeof ev.data === 'string') {
@@ -202,12 +236,11 @@
         return;
       }
       if (ev.data instanceof ArrayBuffer) {
-        const text = relayDecoder.decode(new Uint8Array(ev.data));
-        if (text) {
+        queueDecryptedRelayReceive(ev.data, (text) => {
           import('@tauri-apps/api/core').then(({ invoke }) => {
             invoke('terminal_write', { sessionId: activeSessionId, data: text }).catch(() => {});
           });
-        }
+        });
       }
     };
     ws.onclose = () => {
@@ -220,13 +253,13 @@
     relayWs = ws;
   }
 
-  function connectRemoteViewer() {
+  async function connectRemoteViewer() {
     if (!remoteConfig) return;
     connectionState = 'connecting';
     errorMessage = null;
-    term?.writeln(`\x1b[1;36mJoining remote session (${remoteConfig.mode === 'control' ? 'Read-Write' : 'View-Only'})...\x1b[0m\r\n`);
+    term?.writeln(`\x1b[1;36mJoining E2EE remote session (${remoteConfig.mode === 'control' ? 'Read-Write' : 'View-Only'})...\x1b[0m\r\n`);
 
-    const url = api.getRelayWsUrl(remoteConfig.sessionId, 'viewer', remoteConfig.requestId);
+    const url = await api.resolveRelayWsUrl(remoteConfig.sessionId, 'viewer', remoteConfig.requestId);
     const ws = new WebSocket(url);
     ws.binaryType = 'arraybuffer';
     ws.onopen = () => {
@@ -235,7 +268,9 @@
     };
     ws.onmessage = (ev) => {
       if (ev.data instanceof ArrayBuffer) {
-        term?.write(relayDecoder.decode(new Uint8Array(ev.data)));
+        queueDecryptedRelayReceive(ev.data, (text) => {
+          term?.write(text);
+        });
       } else if (typeof ev.data === 'string') {
         if (!handleRelayControlMessage(ev.data)) {
           term?.write(ev.data);
@@ -498,7 +533,7 @@
   function sendTerminalInput(data: string) {
     if (remoteConfig) {
       if (remoteConfig.mode === 'control' && relayWs?.readyState === WebSocket.OPEN) {
-        relayWs.send(relayEncoder.encode(data));
+        queueEncryptedRelaySend(data);
       }
       return;
     }
@@ -600,7 +635,7 @@
         if (mySeq !== connSeq) return;
         term?.write(event.payload);
         if (relayWs && relayWs.readyState === WebSocket.OPEN && isRelaySharing) {
-          relayWs.send(relayEncoder.encode(event.payload));
+          queueEncryptedRelaySend(event.payload);
         }
       });
 

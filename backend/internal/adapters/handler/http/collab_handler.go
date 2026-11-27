@@ -14,20 +14,94 @@ import (
 	"github.com/opentermius/opentermius/internal/usecase"
 )
 
+const (
+	relaySendQueueCap = 64
+	relayWriteWait    = 10 * time.Second
+	relayPongWait     = 60 * time.Second
+	relayPingPeriod   = 25 * time.Second
+)
+
+type relayOutFrame struct {
+	msgType int
+	data    []byte
+}
+
 type relayPeer struct {
 	conn       *websocket.Conn
 	userID     string
 	userName   string
 	mode       string // "host" | "view" | "control"
 	lastTyping time.Time
-	mu         sync.Mutex
+	sendCh     chan relayOutFrame
+	doneCh     chan struct{}
+	closeOnce  sync.Once
+}
+
+func newRelayPeer(conn *websocket.Conn, userID, userName, mode string) *relayPeer {
+	p := &relayPeer{
+		conn:     conn,
+		userID:   userID,
+		userName: userName,
+		mode:     mode,
+		sendCh:   make(chan relayOutFrame, relaySendQueueCap),
+		doneCh:   make(chan struct{}),
+	}
+	go p.writePump()
+	return p
+}
+
+func (p *relayPeer) close() {
+	p.closeOnce.Do(func() {
+		close(p.doneCh)
+		_ = p.conn.Close()
+	})
+}
+
+func (p *relayPeer) writePump() {
+	ticker := time.NewTicker(relayPingPeriod)
+	defer func() {
+		ticker.Stop()
+		p.close()
+	}()
+
+	for {
+		select {
+		case frame := <-p.sendCh:
+			_ = p.conn.SetWriteDeadline(time.Now().Add(relayWriteWait))
+			if err := p.conn.WriteMessage(frame.msgType, frame.data); err != nil {
+				return
+			}
+		case <-ticker.C:
+			_ = p.conn.SetWriteDeadline(time.Now().Add(relayWriteWait))
+			if err := p.conn.WriteMessage(websocket.PingMessage, nil); err != nil {
+				return
+			}
+		case <-p.doneCh:
+			return
+		}
+	}
 }
 
 func (p *relayPeer) send(msgType int, data []byte) error {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	_ = p.conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
-	return p.conn.WriteMessage(msgType, data)
+	select {
+	case <-p.doneCh:
+		return errors.New("peer closed")
+	default:
+	}
+
+	cp := make([]byte, len(data))
+	copy(cp, data)
+
+	select {
+	case p.sendCh <- relayOutFrame{msgType: msgType, data: cp}:
+		return nil
+	case <-p.doneCh:
+		return errors.New("peer closed")
+	default:
+		// Slow/stalled peer queue is full: disconnect this peer without stalling host or other viewers
+		p.close()
+		return errors.New("peer send buffer full")
+	}
 }
 
 type relayRoom struct {
@@ -49,7 +123,10 @@ func NewCollabHandler(presenceUC *usecase.PresenceUseCase, authService ports.Aut
 		presenceUC:  presenceUC,
 		authService: authService,
 		upgrader: websocket.Upgrader{
-			CheckOrigin: func(r *http.Request) bool { return true },
+			ReadBufferSize:  4096,
+			WriteBufferSize: 4096,
+			WriteBufferPool: &sync.Pool{},
+			CheckOrigin:     func(r *http.Request) bool { return true },
 		},
 		rooms: make(map[string]*relayRoom),
 	}
@@ -211,34 +288,77 @@ func (h *CollabHandler) RespondRemote(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, req)
 }
 
+type issueRelayTicketBody struct {
+	Role      string `json:"role"`       // "host" | "viewer"
+	RequestID string `json:"request_id"` // required when role == "viewer"
+}
+
+func (h *CollabHandler) CreateRelayTicket(w http.ResponseWriter, r *http.Request) {
+	uid := getUserID(r)
+	sessionID := r.PathValue("sessionId")
+	if sessionID == "" {
+		writeJSONError(w, http.StatusBadRequest, "sessionId is required")
+		return
+	}
+
+	var body issueRelayTicketBody
+	_ = json.NewDecoder(r.Body).Decode(&body)
+
+	ticket, err := h.presenceUC.IssueRelayTicket(sessionID, uid, body.Role, body.RequestID)
+	if err != nil {
+		if errors.Is(err, domain.ErrForbidden) {
+			writeJSONError(w, http.StatusForbidden, "remote relay access not approved")
+			return
+		}
+		writeJSONError(w, http.StatusInternalServerError, "failed to issue relay ticket")
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, ticket)
+}
+
 // RelayWS upgrades to a binary WebSocket relay that forwards encrypted PTY frames
 // directly between the session host (russh) and approved team viewers.
 // The Gateway never decrypts or initiates any SSH connection.
 func (h *CollabHandler) RelayWS(w http.ResponseWriter, r *http.Request) {
 	sessionID := r.PathValue("sessionId")
+	ticketToken := r.URL.Query().Get("ticket")
 	token := r.URL.Query().Get("token")
 	role := r.URL.Query().Get("role")
 	requestID := r.URL.Query().Get("request_id")
 
-	if sessionID == "" || token == "" {
-		writeJSONError(w, http.StatusUnauthorized, "sessionId and token are required")
+	if sessionID == "" || (ticketToken == "" && token == "") {
+		writeJSONError(w, http.StatusUnauthorized, "sessionId and ticket are required")
 		return
 	}
 
-	userID, err := h.authService.ValidateToken(r.Context(), token)
-	if err != nil {
-		writeJSONError(w, http.StatusUnauthorized, "invalid or expired token")
-		return
-	}
+	var (
+		userID  uuid.UUID
+		mode    string
+		allowed bool
+	)
 
-	if role != "host" {
-		role = "viewer"
-	}
-
-	mode, allowed := h.presenceUC.ValidateRelayJoin(sessionID, userID, role, requestID)
-	if !allowed {
-		writeJSONError(w, http.StatusForbidden, "remote relay access not approved")
-		return
+	if ticketToken != "" {
+		userID, mode, allowed = h.presenceUC.RedeemRelayTicket(sessionID, ticketToken)
+		if !allowed {
+			writeJSONError(w, http.StatusUnauthorized, "invalid, expired, or already-used relay ticket")
+			return
+		}
+	} else {
+		var err error
+		userID, err = h.authService.ValidateToken(r.Context(), token)
+		if err != nil {
+			writeJSONError(w, http.StatusUnauthorized, "invalid or expired token")
+			return
+		}
+		if role != "host" {
+			role = "viewer"
+		}
+		mode, allowed = h.presenceUC.ValidateRelayJoin(sessionID, userID, role, requestID)
+		if !allowed {
+			writeJSONError(w, http.StatusForbidden, "remote relay access not approved")
+			return
+		}
 	}
 
 	userName := h.presenceUC.GetUserName(r.Context(), userID)
@@ -248,8 +368,12 @@ func (h *CollabHandler) RelayWS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	conn.SetReadLimit(1 << 20) // 1 MiB max WebSocket frame
+	_ = conn.SetReadDeadline(time.Now().Add(relayPongWait))
+	conn.SetPongHandler(func(string) error {
+		return conn.SetReadDeadline(time.Now().Add(relayPongWait))
+	})
 
-	peer := &relayPeer{conn: conn, userID: userID.String(), userName: userName, mode: mode}
+	peer := newRelayPeer(conn, userID.String(), userName, mode)
 	room := h.getOrCreateRoom(sessionID)
 
 	if mode == "host" {
@@ -262,7 +386,7 @@ func (h *CollabHandler) RelayWS(w http.ResponseWriter, r *http.Request) {
 				websocket.FormatCloseMessage(websocket.ClosePolicyViolation, "session already owned by another host"),
 				time.Now().Add(2*time.Second),
 			)
-			_ = conn.Close()
+			peer.close()
 			return
 		}
 	}
@@ -305,7 +429,7 @@ func (h *CollabHandler) RelayWS(w http.ResponseWriter, r *http.Request) {
 	if mode == "host" {
 		room.mu.Lock()
 		if room.host != nil {
-			_ = room.host.conn.Close()
+			room.host.close()
 		}
 		room.host = peer
 		room.mu.Unlock()
@@ -318,7 +442,7 @@ func (h *CollabHandler) RelayWS(w http.ResponseWriter, r *http.Request) {
 	}
 
 	defer func() {
-		_ = conn.Close()
+		peer.close()
 		room.mu.Lock()
 		if mode == "host" {
 			if room.host == peer {
@@ -331,7 +455,10 @@ func (h *CollabHandler) RelayWS(w http.ResponseWriter, r *http.Request) {
 			})
 			for v := range room.viewers {
 				_ = v.send(websocket.TextMessage, endedMsg)
-				_ = v.conn.Close()
+				go func(vp *relayPeer) {
+					time.Sleep(120 * time.Millisecond)
+					vp.close()
+				}(v)
 			}
 			room.viewers = make(map[*relayPeer]struct{})
 		} else {

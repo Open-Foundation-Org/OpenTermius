@@ -952,6 +952,34 @@ class ApiClient {
     });
   }
 
+  async createRelayTicket(
+    sessionId: string,
+    role: 'host' | 'viewer',
+    requestId?: string
+  ): Promise<{ ticket: string; session_id: string; mode: string; expires_at: string }> {
+    return this.request<{ ticket: string; session_id: string; mode: string; expires_at: string }>(
+      `/relay/${encodeURIComponent(sessionId)}/ticket`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ role, request_id: requestId || '' })
+      }
+    );
+  }
+
+  async resolveRelayWsUrl(sessionId: string, role: 'host' | 'viewer', requestId?: string): Promise<string> {
+    const wsBase = this.apiBase.replace(/^http:\/\//i, 'ws://').replace(/^https:\/\//i, 'wss://');
+    try {
+      const issued = await this.createRelayTicket(sessionId, role, requestId);
+      if (issued?.ticket) {
+        const params = new URLSearchParams({ ticket: issued.ticket });
+        return `${wsBase}/relay/${encodeURIComponent(sessionId)}?${params.toString()}`;
+      }
+    } catch {
+      // Fallback to token query parameter if connecting to an older Gateway instance
+    }
+    return this.getRelayWsUrl(sessionId, role, requestId);
+  }
+
   getRelayWsUrl(sessionId: string, role: 'host' | 'viewer', requestId?: string): string {
     const wsBase = this.apiBase.replace(/^http:\/\//i, 'ws://').replace(/^https:\/\//i, 'wss://');
     const params = new URLSearchParams({
