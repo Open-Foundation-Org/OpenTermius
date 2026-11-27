@@ -14,7 +14,8 @@
     UserPlus,
     Check,
     X,
-    Shield
+    Shield,
+    Trash2
   } from '@lucide/svelte';
 
   interface Props {
@@ -106,6 +107,20 @@
       inviteEmail = '';
     } catch (err: unknown) {
       inviteError = formatErrorMessage(err, 'Failed to invite user to vault');
+    }
+  }
+
+  async function handleRemoveMember(member: ApiVaultMember) {
+    if (!selectedVaultForMembers || member.role === 'owner') return;
+    const display = member.name || member.email || member.user_id.slice(0, 8);
+    if (!(await toast.confirm(`Remove "${display}" from "${selectedVaultForMembers.name}"?`, 'Remove'))) return;
+
+    try {
+      await api.removeVaultMember(selectedVaultForMembers.id, member.user_id);
+      vaultMembers = vaultMembers.filter((m) => m.id !== member.id);
+      toast.success(`Removed ${display} from vault.`);
+    } catch (err: unknown) {
+      toast.error(err, 'Failed to remove member');
     }
   }
 
@@ -268,9 +283,15 @@
   {/if}
 </div>
 
+<svelte:window onkeydown={(e) => { if (e.key === 'Escape' && selectedVaultForMembers) selectedVaultForMembers = null; }} />
+
 <!-- Team Members & Invitation Modal -->
 {#if selectedVaultForMembers}
-  <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4 overflow-y-auto">
+  <div
+    class="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4 overflow-y-auto"
+    onclick={(e) => { if (e.target === e.currentTarget) selectedVaultForMembers = null; }}
+    role="presentation"
+  >
     <div class="w-full max-w-lg max-h-[85dvh] overflow-y-auto rounded-2xl border border-[#28283a] bg-[#14141e] p-4 sm:p-6 shadow-2xl space-y-5 animate-in fade-in zoom-in-95 duration-150 my-auto">
       <div class="flex items-start justify-between">
         <div class="flex items-center gap-3">
@@ -336,14 +357,36 @@
         {:else}
           <div class="max-h-48 overflow-y-auto space-y-1.5 pr-1">
             {#each vaultMembers as m (m.id)}
-              <div class="flex items-center justify-between rounded-lg bg-[#0d0d14] border border-[#20202e] px-3 py-2">
-                <div class="flex items-center gap-2 truncate">
-                  <Shield class="h-3.5 w-3.5 text-neutral-400" />
-                  <span class="font-mono text-[11px] text-neutral-300">User ID: {m.user_id.slice(0, 8)}...</span>
+              <div class="flex items-center justify-between gap-2 rounded-lg bg-[#0d0d14] border border-[#20202e] px-3 py-2">
+                <div class="flex items-center gap-2 min-w-0">
+                  <Shield class="h-3.5 w-3.5 text-neutral-400 shrink-0" />
+                  <div class="min-w-0">
+                    {#if m.name || m.email}
+                      <p class="text-xs font-medium text-neutral-100 truncate">{m.name || m.email}</p>
+                      {#if m.name && m.email}
+                        <p class="font-mono text-[10px] text-neutral-400 truncate">{m.email}</p>
+                      {/if}
+                    {:else}
+                      <span class="font-mono text-[11px] text-neutral-300">User ID: {m.user_id.slice(0, 8)}...</span>
+                    {/if}
+                  </div>
                 </div>
-                <span class="rounded bg-indigo-500/15 px-2 py-0.5 text-[10px] font-bold text-indigo-300 uppercase">
-                  {m.role}
-                </span>
+                <div class="flex items-center gap-1.5 shrink-0">
+                  <span class="rounded bg-indigo-500/15 px-2 py-0.5 text-[10px] font-bold text-indigo-300 uppercase">
+                    {m.role}
+                  </span>
+                  {#if m.role !== 'owner'}
+                    <button
+                      type="button"
+                      onclick={() => handleRemoveMember(m)}
+                      class="rounded p-1 text-neutral-500 hover:text-rose-400 hover:bg-rose-500/10 transition cursor-pointer"
+                      title="Remove member"
+                      aria-label="Remove member"
+                    >
+                      <Trash2 class="h-3.5 w-3.5" />
+                    </button>
+                  {/if}
+                </div>
               </div>
             {/each}
           </div>

@@ -6,12 +6,13 @@ use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, UNIX_EPOCH};
 
 use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize};
-use russh::keys::{decode_secret_key, PrivateKeyWithHashAlg, PublicKeyOrCertificate};
+use russh::keys::{decode_secret_key, ssh_key, PrivateKey, PrivateKeyWithHashAlg, PublicKeyOrCertificate};
 use russh::{client, ChannelMsg, ChannelWriteHalf, Disconnect};
 use russh_sftp::client::SftpSession;
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, State};
-use tokio::io::AsyncWriteExt;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::TcpListener;
 
 static KNOWN_HOSTS: OnceLock<Mutex<HashMap<String, String>>> = OnceLock::new();
 
@@ -883,6 +884,250 @@ async fn sftp_write_bytes(
     Ok(())
 }
 
+#[tauri::command]
+async fn sftp_rename(
+    pool: State<'_, SftpPoolState>,
+    config: SftpConnectionConfig,
+    old_path: String,
+    new_path: String,
+) -> Result<(), String> {
+    let sftp = get_pooled_sftp(&pool, &config, false).await?;
+    if sftp.rename(&old_path, &new_path).await.is_err() {
+        let sftp = get_pooled_sftp(&pool, &config, true).await?;
+        sftp.rename(&old_path, &new_path)
+            .await
+            .map_err(|e| format!("Failed to rename '{}': {}", old_path, e))?;
+    }
+    Ok(())
+}
+
+// ============================================================================
+// SSH Keypair Generation & Native Port Forwarding (Local -L & Dynamic SOCKS5)
+// ============================================================================
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GeneratedKeyPair {
+    pub public_key: String,
+    pub private_key: String,
+}
+
+#[tauri::command]
+async fn ssh_generate_keypair(
+    key_type: String,
+    passphrase: Option<String>,
+) -> Result<GeneratedKeyPair, String> {
+    tokio::task::spawn_blocking(move || {
+        let mut rng = rand::rng();
+        let priv_key = if key_type.to_uppercase().starts_with("RSA") {
+            let rsa = ssh_key::private::RsaKeypair::random(&mut rng, 4096)
+                .map_err(|e| format!("Failed to generate RSA-4096 key: {}", e))?;
+            PrivateKey::from(rsa)
+        } else {
+            PrivateKey::random(&mut rng, ssh_key::Algorithm::Ed25519)
+                .map_err(|e| format!("Failed to generate Ed25519 key: {}", e))?
+        };
+
+        let pub_openssh = priv_key
+            .public_key()
+            .to_openssh()
+            .map_err(|e| format!("Failed to encode public key: {}", e))?;
+
+        let final_key = if let Some(pass) = passphrase.filter(|p| !p.is_empty()) {
+            priv_key
+                .encrypt(&mut rng, pass)
+                .map_err(|e| format!("Failed to encrypt private key: {}", e))?
+        } else {
+            priv_key
+        };
+
+        let priv_pem = final_key
+            .to_openssh(ssh_key::LineEnding::LF)
+            .map_err(|e| format!("Failed to encode private key: {}", e))?
+            .to_string();
+
+        Ok(GeneratedKeyPair {
+            public_key: format!("{} opentermius", pub_openssh),
+            private_key: priv_pem,
+        })
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[derive(Default)]
+pub struct TunnelState {
+    tunnels: Arc<tokio::sync::Mutex<HashMap<String, tauri::async_runtime::JoinHandle<()>>>>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TunnelStartConfig {
+    pub tunnel_id: String,
+    pub tunnel_type: String,
+    pub local_port: u16,
+    pub remote_host: Option<String>,
+    pub remote_port: Option<u16>,
+    pub address: String,
+    pub port: Option<u16>,
+    pub username: String,
+    pub password: Option<String>,
+    pub private_key: Option<String>,
+    pub passphrase: Option<String>,
+}
+
+async fn handle_socks5_client(
+    mut stream: tokio::net::TcpStream,
+    ssh: Arc<tokio::sync::Mutex<client::Handle<SshClientHandler>>>,
+    peer_port: u32,
+) -> Result<(), String> {
+    let mut head = [0u8; 2];
+    stream.read_exact(&mut head).await.map_err(|e| e.to_string())?;
+    if head[0] != 0x05 {
+        return Err("Unsupported SOCKS version".to_string());
+    }
+    let nmethods = head[1] as usize;
+    let mut methods = vec![0u8; nmethods];
+    stream.read_exact(&mut methods).await.map_err(|e| e.to_string())?;
+    if !methods.contains(&0x00) {
+        let _ = stream.write_all(&[0x05, 0xFF]).await;
+        return Err("No supported SOCKS5 auth method".to_string());
+    }
+    stream.write_all(&[0x05, 0x00]).await.map_err(|e| e.to_string())?;
+
+    let mut req = [0u8; 4];
+    stream.read_exact(&mut req).await.map_err(|e| e.to_string())?;
+    if req[0] != 0x05 || req[1] != 0x01 {
+        let _ = stream.write_all(&[0x05, 0x07, 0x00, 0x01, 0, 0, 0, 0, 0, 0]).await;
+        return Err("Only SOCKS5 CONNECT is supported".to_string());
+    }
+
+    let target_host = match req[3] {
+        0x01 => {
+            let mut ip = [0u8; 4];
+            stream.read_exact(&mut ip).await.map_err(|e| e.to_string())?;
+            std::net::Ipv4Addr::from(ip).to_string()
+        }
+        0x03 => {
+            let mut len = [0u8; 1];
+            stream.read_exact(&mut len).await.map_err(|e| e.to_string())?;
+            let mut domain = vec![0u8; len[0] as usize];
+            stream.read_exact(&mut domain).await.map_err(|e| e.to_string())?;
+            String::from_utf8_lossy(&domain).to_string()
+        }
+        0x04 => {
+            let mut ip = [0u8; 16];
+            stream.read_exact(&mut ip).await.map_err(|e| e.to_string())?;
+            std::net::Ipv6Addr::from(ip).to_string()
+        }
+        _ => {
+            let _ = stream.write_all(&[0x05, 0x08, 0x00, 0x01, 0, 0, 0, 0, 0, 0]).await;
+            return Err("Unsupported address type".to_string());
+        }
+    };
+
+    let mut port_buf = [0u8; 2];
+    stream.read_exact(&mut port_buf).await.map_err(|e| e.to_string())?;
+    let target_port = u16::from_be_bytes(port_buf) as u32;
+
+    let channel = {
+        let s = ssh.lock().await;
+        s.channel_open_direct_tcpip(target_host, target_port, "127.0.0.1", peer_port)
+            .await
+    };
+    let channel = match channel {
+        Ok(ch) => ch,
+        Err(e) => {
+            let _ = stream.write_all(&[0x05, 0x05, 0x00, 0x01, 0, 0, 0, 0, 0, 0]).await;
+            return Err(e.to_string());
+        }
+    };
+
+    stream
+        .write_all(&[0x05, 0x00, 0x00, 0x01, 0, 0, 0, 0, 0, 0])
+        .await
+        .map_err(|e| e.to_string())?;
+    let mut ch_stream = channel.into_stream();
+    let _ = tokio::io::copy_bidirectional(&mut stream, &mut ch_stream).await;
+    Ok(())
+}
+
+#[tauri::command]
+async fn tunnel_start(
+    app: AppHandle,
+    state: State<'_, TunnelState>,
+    config: TunnelStartConfig,
+) -> Result<(), String> {
+    if let Some(prev) = state.tunnels.lock().await.remove(&config.tunnel_id) {
+        prev.abort();
+    }
+
+    let listener = TcpListener::bind(("127.0.0.1", config.local_port))
+        .await
+        .map_err(|e| format!("Failed to bind local port {}: {}", config.local_port, e))?;
+
+    let session = establish_ssh_session(
+        config.address.trim(),
+        config.port.unwrap_or(22),
+        config.username.trim(),
+        config.password.as_deref(),
+        config.private_key.as_deref(),
+        config.passphrase.as_deref(),
+    )
+    .await?;
+
+    let ssh = Arc::new(tokio::sync::Mutex::new(session));
+    let tunnel_id = config.tunnel_id.clone();
+    let tunnel_type = config.tunnel_type.clone();
+    let remote_host = config
+        .remote_host
+        .clone()
+        .unwrap_or_else(|| "127.0.0.1".to_string());
+    let remote_port = config.remote_port.unwrap_or(5432) as u32;
+    let tunnels_arc = state.tunnels.clone();
+
+    let handle = tauri::async_runtime::spawn(async move {
+        loop {
+            let Ok((mut tcp_stream, peer_addr)) = listener.accept().await else {
+                break;
+            };
+            let ssh_clone = ssh.clone();
+            let t_type = tunnel_type.clone();
+            let r_host = remote_host.clone();
+            let peer_port = peer_addr.port() as u32;
+
+            tauri::async_runtime::spawn(async move {
+                if t_type == "dynamic" {
+                    let _ = handle_socks5_client(tcp_stream, ssh_clone, peer_port).await;
+                } else {
+                    let ch = {
+                        let s = ssh_clone.lock().await;
+                        s.channel_open_direct_tcpip(r_host, remote_port, "127.0.0.1", peer_port)
+                            .await
+                    };
+                    if let Ok(channel) = ch {
+                        let mut ch_stream = channel.into_stream();
+                        let _ = tokio::io::copy_bidirectional(&mut tcp_stream, &mut ch_stream).await;
+                    }
+                }
+            });
+        }
+        tunnels_arc.lock().await.remove(&tunnel_id);
+        let _ = app.emit(&format!("tunnel-closed:{}", tunnel_id), ());
+    });
+
+    state.tunnels.lock().await.insert(config.tunnel_id, handle);
+    Ok(())
+}
+
+#[tauri::command]
+async fn tunnel_stop(state: State<'_, TunnelState>, tunnel_id: String) -> Result<(), String> {
+    if let Some(handle) = state.tunnels.lock().await.remove(&tunnel_id) {
+        handle.abort();
+    }
+    Ok(())
+}
+
 // ============================================================================
 // Local Filesystem Commands
 // ============================================================================
@@ -1020,12 +1265,20 @@ async fn local_fs_write_bytes(path: String, data: Vec<u8>) -> Result<(), String>
         .map_err(|e| e.to_string())?
 }
 
+#[tauri::command]
+async fn local_fs_rename(old_path: String, new_path: String) -> Result<(), String> {
+    tokio::task::spawn_blocking(move || std::fs::rename(old_path, new_path).map_err(|e| e.to_string()))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     #[allow(unused_mut)]
     let mut builder = tauri::Builder::default()
         .manage(TerminalState::default())
         .manage(SftpPoolState::default())
+        .manage(TunnelState::default())
         .plugin(
             tauri_plugin_log::Builder::default()
                 .level(log::LevelFilter::Info)
@@ -1046,14 +1299,19 @@ pub fn run() {
             terminal_resize,
             terminal_close,
             ssh_trust_host_key,
+            ssh_generate_keypair,
+            tunnel_start,
+            tunnel_stop,
             sftp_list,
             sftp_mkdir,
             sftp_delete,
+            sftp_rename,
             sftp_read_bytes,
             sftp_write_bytes,
             local_fs_list,
             local_fs_mkdir,
             local_fs_delete,
+            local_fs_rename,
             local_fs_read_bytes,
             local_fs_write_bytes
         ])

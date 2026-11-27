@@ -18,7 +18,10 @@
     AlertCircle,
     X,
     Laptop,
-    Check
+    Check,
+    Eye,
+    EyeOff,
+    Pencil
   } from '@lucide/svelte';
 
   export interface SftpHostItem {
@@ -93,18 +96,24 @@
   let pathInputValue = $state('');
   let items = $state<ApiSftpFile[]>([]);
   let searchQuery = $state('');
+  let showHidden = $state(false);
   let loadState = $state<'idle' | 'loading' | 'success' | 'empty' | 'error'>('idle');
   let errorMessage = $state<string | null>(null);
   let isUploading = $state(false);
   let isNewFolderOpen = $state(false);
   let newFolderName = $state('');
+  let renamingItem = $state<ApiSftpFile | null>(null);
+  let renameValue = $state('');
   let fileInputRef: HTMLInputElement | null = null;
 
   let isLocal = $derived(targetId === 'local');
   let currentHost = $derived(isLocal ? null : hosts.find((h) => h.id === targetId) || null);
 
   let filteredItems = $derived(
-    items.filter((item) => item.name.toLowerCase().includes(searchQuery.toLowerCase()))
+    items.filter((item) => {
+      if (!showHidden && item.name.startsWith('.')) return false;
+      return item.name.toLowerCase().includes(searchQuery.toLowerCase());
+    })
   );
 
   function getHostConfig(): SftpHostConfig | null {
@@ -285,6 +294,38 @@
     }
   }
 
+  function openRenameModal(item: ApiSftpFile) {
+    renamingItem = item;
+    renameValue = item.name;
+  }
+
+  async function handleRenameSubmit(e: SubmitEvent) {
+    e.preventDefault();
+    if (!renamingItem) return;
+    const trimmed = renameValue.trim();
+    if (!trimmed || trimmed === renamingItem.name) {
+      renamingItem = null;
+      return;
+    }
+
+    const newPath = joinChildPath(currentPath, trimmed);
+    try {
+      if (isLocal) {
+        const { invoke } = await import('@tauri-apps/api/core');
+        await invoke('local_fs_rename', { oldPath: renamingItem.path, newPath });
+      } else {
+        const config = getHostConfig();
+        if (!config) return;
+        await api.sftpRename(config, renamingItem.path, newPath);
+      }
+      renamingItem = null;
+      await loadDirectory(currentPath);
+      toast.success(`Renamed to "${trimmed}".`);
+    } catch (err: unknown) {
+      toast.error(err, 'Rename failed');
+    }
+  }
+
   async function handleUploadChange(e: Event) {
     const input = e.target as HTMLInputElement;
     if (!input.files || input.files.length === 0) return;
@@ -349,7 +390,7 @@
           class="bg-transparent text-xs font-medium text-white outline-none w-full truncate"
         >
           {#if platform.isNativeTauri}
-            <option value="local" class="bg-[#121218]">Local Machine (This Mac)</option>
+            <option value="local" class="bg-[#121218]">Local Machine</option>
           {/if}
           {#each hosts as h (h.id)}
             <option value={h.id} class="bg-[#121218]">
@@ -436,6 +477,20 @@
         class="w-full rounded-md border border-[#242432] bg-[#0a0a0e] pl-6 pr-2 py-1.5 sm:py-1 text-xs sm:text-[11px] text-neutral-200 outline-none focus:border-emerald-500/60"
       />
     </div>
+
+    <button
+      type="button"
+      onclick={() => (showHidden = !showHidden)}
+      class="flex h-8 w-8 sm:h-7 sm:w-7 items-center justify-center rounded-md border transition shrink-0 cursor-pointer {showHidden ? 'border-emerald-500/40 bg-emerald-500/15 text-emerald-300' : 'border-[#242432] bg-[#16161f] text-neutral-400 hover:text-white'}"
+      title={showHidden ? 'Hide dotfiles' : 'Show hidden files (dotfiles)'}
+      aria-label={showHidden ? 'Hide dotfiles' : 'Show hidden files'}
+    >
+      {#if showHidden}
+        <Eye class="h-3.5 w-3.5" />
+      {:else}
+        <EyeOff class="h-3.5 w-3.5" />
+      {/if}
+    </button>
   </div>
 
   <!-- File List -->
@@ -473,8 +528,21 @@
         </div>
       </div>
     {:else if loadState === 'empty' || filteredItems.length === 0}
-      <div class="flex h-full flex-col items-center justify-center p-6 text-center text-xs text-neutral-500">
-        {isPaneDragOver ? 'Drop here to transfer' : 'Empty directory'}
+      <div class="flex h-full flex-col items-center justify-center p-6 text-center text-xs text-neutral-500 gap-2">
+        {#if isPaneDragOver}
+          <span>Drop here to transfer</span>
+        {:else if searchQuery.trim()}
+          <span>No files match "{searchQuery.trim()}"</span>
+          <button
+            type="button"
+            onclick={() => (searchQuery = '')}
+            class="rounded-md border border-white/[0.1] bg-[#161620] px-2.5 py-1 text-[11px] text-neutral-300 hover:text-white cursor-pointer"
+          >
+            Clear Filter
+          </button>
+        {:else}
+          <span>Empty directory</span>
+        {/if}
       </div>
     {:else if platform.isMobile}
       <!-- Mobile Touch File List -->
@@ -515,6 +583,14 @@
             </button>
 
             <div class="flex items-center gap-1 shrink-0" data-no-drag>
+              <button
+                type="button"
+                onclick={() => openRenameModal(item)}
+                class="flex h-9 w-9 items-center justify-center rounded-lg text-neutral-400 active:bg-[#222230] active:text-emerald-400 transition"
+                aria-label="Rename"
+              >
+                <Pencil class="h-4 w-4" />
+              </button>
               {#if !item.isDir && !isLocal}
                 <button
                   type="button"
@@ -586,6 +662,14 @@
               </td>
               <td class="py-1.5 px-2 text-right whitespace-nowrap" data-no-drag>
                 <div class="inline-flex items-center gap-1 opacity-80 group-hover:opacity-100">
+                  <button
+                    type="button"
+                    onclick={() => openRenameModal(item)}
+                    class="rounded p-1 text-neutral-400 hover:bg-[#222230] hover:text-emerald-400 transition cursor-pointer"
+                    title="Rename"
+                  >
+                    <Pencil class="h-3.5 w-3.5" />
+                  </button>
                   {#if !item.isDir && !isLocal}
                     <button
                       type="button"
@@ -614,8 +698,19 @@
   </div>
 </div>
 
+<svelte:window onkeydown={(e) => {
+  if (e.key === 'Escape') {
+    if (renamingItem) renamingItem = null;
+    if (isNewFolderOpen) isNewFolderOpen = false;
+  }
+}} />
+
 {#if isNewFolderOpen}
-  <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/65 p-4 backdrop-blur-xs">
+  <div
+    class="fixed inset-0 z-50 flex items-center justify-center bg-black/65 p-4 backdrop-blur-xs"
+    onclick={(e) => { if (e.target === e.currentTarget) isNewFolderOpen = false; }}
+    role="presentation"
+  >
     <form
       onsubmit={handleCreateFolder}
       class="w-full max-w-xs rounded-2xl border border-[#262635] bg-[#14141c] p-4 space-y-3 shadow-2xl"
@@ -645,6 +740,47 @@
           class="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-500"
         >
           Create
+        </button>
+      </div>
+    </form>
+  </div>
+{/if}
+
+{#if renamingItem}
+  <div
+    class="fixed inset-0 z-50 flex items-center justify-center bg-black/65 p-4 backdrop-blur-xs"
+    onclick={(e) => { if (e.target === e.currentTarget) renamingItem = null; }}
+    role="presentation"
+  >
+    <form
+      onsubmit={handleRenameSubmit}
+      class="w-full max-w-xs rounded-2xl border border-[#262635] bg-[#14141c] p-4 space-y-3 shadow-2xl"
+    >
+      <div class="flex items-center justify-between">
+        <h3 class="text-xs font-semibold text-white">Rename {renamingItem.isDir ? 'Folder' : 'File'}</h3>
+        <button type="button" onclick={() => (renamingItem = null)} class="text-neutral-400 hover:text-white">
+          <X class="h-4 w-4" />
+        </button>
+      </div>
+      <input
+        type="text"
+        bind:value={renameValue}
+        class="w-full rounded-lg border border-[#2a2a38] bg-[#0c0c10] px-3 py-2 text-xs text-white outline-none focus:border-emerald-500"
+        required
+      />
+      <div class="flex justify-end gap-2">
+        <button
+          type="button"
+          onclick={() => (renamingItem = null)}
+          class="rounded-lg px-3 py-1.5 text-xs text-neutral-400 hover:text-white"
+        >
+          Cancel
+        </button>
+        <button
+          type="submit"
+          class="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-500"
+        >
+          Rename
         </button>
       </div>
     </form>

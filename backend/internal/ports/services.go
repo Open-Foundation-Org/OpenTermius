@@ -33,6 +33,7 @@ type VaultService interface {
 	// Members
 	InviteMember(ctx context.Context, callerID, vaultID uuid.UUID, email string, role domain.VaultRole) (*domain.VaultMember, error)
 	ListMembers(ctx context.Context, callerID, vaultID uuid.UUID) ([]domain.VaultMember, error)
+	RemoveMember(ctx context.Context, callerID, vaultID, targetUserID uuid.UUID) error
 }
 
 type SessionLogService interface {

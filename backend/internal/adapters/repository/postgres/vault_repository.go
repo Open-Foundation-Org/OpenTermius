@@ -105,10 +105,11 @@ func (r *VaultRepository) GetMemberRole(ctx context.Context, vaultID, userID uui
 
 func (r *VaultRepository) ListMembers(ctx context.Context, vaultID uuid.UUID) ([]domain.VaultMember, error) {
 	query := `
-		SELECT id, vault_id, user_id, role, encrypted_vault_key, created_at
-		FROM vault_members
-		WHERE vault_id = $1
-		ORDER BY created_at ASC
+		SELECT vm.id, vm.vault_id, vm.user_id, vm.role, vm.encrypted_vault_key, vm.created_at, u.name, u.email
+		FROM vault_members vm
+		INNER JOIN users u ON u.id = vm.user_id
+		WHERE vm.vault_id = $1
+		ORDER BY vm.created_at ASC
 	`
 	rows, err := r.pool.Query(ctx, query, vaultID)
 	if err != nil {
@@ -120,13 +121,22 @@ func (r *VaultRepository) ListMembers(ctx context.Context, vaultID uuid.UUID) ([
 	for rows.Next() {
 		var m domain.VaultMember
 		var role string
-		if err := rows.Scan(&m.ID, &m.VaultID, &m.UserID, &role, &m.EncryptedVaultKey, &m.CreatedAt); err != nil {
+		if err := rows.Scan(&m.ID, &m.VaultID, &m.UserID, &role, &m.EncryptedVaultKey, &m.CreatedAt, &m.Name, &m.Email); err != nil {
 			return nil, err
 		}
 		m.Role = domain.VaultRole(role)
 		members = append(members, m)
 	}
 	return members, nil
+}
+
+func (r *VaultRepository) RemoveMember(ctx context.Context, vaultID, userID uuid.UUID) error {
+	query := `
+		DELETE FROM vault_members
+		WHERE vault_id = $1 AND user_id = $2
+	`
+	_, err := r.pool.Exec(ctx, query, vaultID, userID)
+	return err
 }
 
 func (r *VaultRepository) CreateItem(ctx context.Context, item *domain.VaultItem) error {

@@ -29,8 +29,9 @@ This document serves as the single source of truth for all OpenTermius Gateway R
 | `PUT` | `/api/v1/vaults/:id/items/:itemId` | Update encrypted item | Yes |
 | `PUT` | `/api/v1/vaults/:id/items/:itemId/move` | Move item to another vault | Yes |
 | `DELETE`| `/api/v1/vaults/:id/items/:itemId` | Delete item from vault | Yes |
-| `GET` | `/api/v1/vaults/:id/members` | List members of a team vault | Yes |
+| `GET` | `/api/v1/vaults/:id/members` | List members of a team vault (includes `name` and `email`) | Yes |
 | `POST` | `/api/v1/vaults/:id/members` | Invite a teammate to vault by email (sends SMTP notification if enabled) | Yes |
+| `DELETE` | `/api/v1/vaults/:id/members/:userId` | Remove a member from a team vault (Owner/Admin) | Yes |
 | `GET` | `/api/v1/settings/smtp` | Read Gateway SMTP settings (password masked) | Admin |
 | `PUT` | `/api/v1/settings/smtp` | Save Gateway SMTP settings in PostgreSQL (password encrypted at rest) | Admin |
 | `POST` | `/api/v1/settings/smtp/test` | Send a test email using saved SMTP settings | Admin |
@@ -51,14 +52,20 @@ This document serves as the single source of truth for all OpenTermius Gateway R
 | `terminal_write` | Write user keystrokes/bytes to active SSH or Local PTY session |
 | `terminal_resize` | Resize active SSH channel window or Local PTY dimensions |
 | `terminal_close` | Close and disconnect active SSH or Local PTY session |
+| `ssh_trust_host_key` | Reset/trust updated server host key in local known hosts |
+| `ssh_generate_keypair` | Generate real Ed25519 or RSA-4096 OpenSSH keypair |
+| `tunnel_start` | Start native SSH local (`-L`) or dynamic SOCKS5 (`-D`) tunnel |
+| `tunnel_stop` | Stop an active native SSH tunnel listener |
 | `sftp_list` | List directory entries on remote host via native `russh-sftp` |
 | `sftp_mkdir` | Create directory on remote host via native `russh-sftp` |
 | `sftp_delete` | Delete file or directory on remote host via native `russh-sftp` |
+| `sftp_rename` | Rename or move file/directory on remote host via native `russh-sftp` |
 | `sftp_read_bytes` | Read/download file bytes from remote host via native `russh-sftp` |
 | `sftp_write_bytes` | Write/upload file bytes to remote host via native `russh-sftp` |
 | `local_fs_list` | List local device filesystem directory |
 | `local_fs_mkdir` | Create directory on local device filesystem |
 | `local_fs_delete` | Delete file or directory on local device filesystem |
+| `local_fs_rename` | Rename or move file/directory on local device filesystem |
 | `local_fs_read_bytes` | Read file bytes from local device filesystem |
 | `local_fs_write_bytes` | Write file bytes to local device filesystem |
 

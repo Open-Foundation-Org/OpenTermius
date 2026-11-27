@@ -76,6 +76,10 @@ func (s *stubVaultRepo) GetMemberRole(_ context.Context, vaultID, userID uuid.UU
 func (s *stubVaultRepo) ListMembers(_ context.Context, _ uuid.UUID) ([]domain.VaultMember, error) {
 	return nil, nil
 }
+func (s *stubVaultRepo) RemoveMember(_ context.Context, vaultID, userID uuid.UUID) error {
+	delete(s.members, vaultID.String()+":"+userID.String())
+	return nil
+}
 func (s *stubVaultRepo) CreateItem(_ context.Context, _ *domain.VaultItem) error { return nil }
 func (s *stubVaultRepo) GetItemByID(_ context.Context, _, _ uuid.UUID) (*domain.VaultItem, error) {
 	return nil, domain.ErrNotFound

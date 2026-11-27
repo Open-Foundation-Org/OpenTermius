@@ -18,6 +18,7 @@
     Download,
     Eye,
     EyeOff,
+    Pencil,
     X
   } from '@lucide/svelte';
 
@@ -44,6 +45,8 @@
 
   let keys = $state<KeyItem[]>([]);
   let isAddOpen = $state(false);
+  let editingId = $state<string | null>(null);
+  let isGenerating = $state(false);
   let isSaving = $state(false);
   let formError = $state<string | null>(null);
 
@@ -107,27 +110,43 @@
     }
   }
 
-  function generateSampleKeyPair() {
-    const randomBytes = crypto.getRandomValues(new Uint8Array(32));
-    const randomHex = Array.from(randomBytes)
-      .map((b) => b.toString(16).padStart(2, '0'))
-      .join('');
-
-    if (newKeyType === 'ED25519') {
-      newPublicKey = `ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAI${btoa(randomHex.slice(0, 32)).replace(/=/g, '')} opentermius-key`;
-      newPrivateKey = `-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAMwAAAAtzc2gtZW\nQyNTUxOQAAACD${btoa(randomHex).slice(0, 40)}\n-----END OPENSSH PRIVATE KEY-----`;
-    } else {
-      newPublicKey = `ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAACAQ${btoa(randomHex).replace(/=/g, '')} opentermius-rsa`;
-      newPrivateKey = `-----BEGIN RSA PRIVATE KEY-----\nMIIEowIBAAKCAQEA${btoa(randomHex).slice(0, 50)}\n-----END RSA PRIVATE KEY-----`;
+  async function generateKeyPair() {
+    if (isGenerating) return;
+    isGenerating = true;
+    formError = null;
+    try {
+      const pair = await api.sshGenerateKeypair(newKeyType, newPassphrase.trim() || undefined);
+      newPublicKey = pair.publicKey;
+      newPrivateKey = pair.privateKey;
+    } catch (err: unknown) {
+      formError = formatErrorMessage(err, 'Native SSH key generation requires the OpenTermius app');
+    } finally {
+      isGenerating = false;
     }
   }
 
   function openAddModal() {
+    editingId = null;
     newLabel = '';
     newKeyType = 'ED25519';
+    newPrivateKey = '';
+    newPublicKey = '';
     newPassphrase = '';
+    showPassphrase = false;
     formError = null;
-    generateSampleKeyPair(); // Pre-generate a key so form is ready to save immediately
+    isAddOpen = true;
+    void generateKeyPair();
+  }
+
+  function openEditModal(key: KeyItem) {
+    editingId = key.id;
+    newLabel = key.label;
+    newKeyType = key.keyType || 'ED25519';
+    newPrivateKey = key.privateKey;
+    newPublicKey = key.publicKey;
+    newPassphrase = key.passphrase || '';
+    showPassphrase = false;
+    formError = null;
     isAddOpen = true;
   }
 
@@ -147,7 +166,7 @@
     }
 
     if (!newPrivateKey.trim()) {
-      formError = 'Private key is required. Click "Generate Key Pair" or paste a PEM key.';
+      formError = 'Private key is required. Click "Generate New Pair" or paste a PEM key.';
       return;
     }
 
@@ -163,25 +182,48 @@
 
       const { ciphertext, nonce } = await encryptVaultPayload(payload, api.getVaultSecret(vaultId));
 
-      const created = await api.createVaultItem(vaultId, {
-        kind: 'key',
-        label: newLabel.trim(),
-        ciphertext,
-        nonce
-      });
+      if (editingId) {
+        await api.updateVaultItem(vaultId, editingId, {
+          label: newLabel.trim(),
+          ciphertext,
+          nonce
+        });
+        keys = keys.map((k) =>
+          k.id === editingId
+            ? {
+                ...k,
+                label: newLabel.trim(),
+                keyType: newKeyType,
+                publicKey: newPublicKey.trim(),
+                privateKey: newPrivateKey.trim(),
+                passphrase: newPassphrase.trim()
+              }
+            : k
+        );
+        toast.success('SSH key updated.');
+      } else {
+        const created = await api.createVaultItem(vaultId, {
+          kind: 'key',
+          label: newLabel.trim(),
+          ciphertext,
+          nonce
+        });
 
-      keys.unshift({
-        id: created.id,
-        label: newLabel.trim(),
-        keyType: newKeyType,
-        publicKey: newPublicKey.trim(),
-        privateKey: newPrivateKey.trim(),
-        passphrase: newPassphrase.trim(),
-        createdAt: created.created_at
-      });
+        keys.unshift({
+          id: created.id,
+          label: newLabel.trim(),
+          keyType: newKeyType,
+          publicKey: newPublicKey.trim(),
+          privateKey: newPrivateKey.trim(),
+          passphrase: newPassphrase.trim(),
+          createdAt: created.created_at
+        });
+        toast.success('SSH key saved.');
+      }
 
       state = 'success';
       isAddOpen = false;
+      editingId = null;
       newLabel = '';
       newPrivateKey = '';
       newPublicKey = '';
@@ -334,6 +376,15 @@
             {/if}
             <button
               type="button"
+              onclick={() => openEditModal(key)}
+              class="rounded-lg p-1.5 text-neutral-500 hover:text-emerald-400 hover:bg-white/[0.06] transition cursor-pointer"
+              title="Edit Key"
+              aria-label="Edit Key"
+            >
+              <Pencil class="h-3.5 w-3.5" />
+            </button>
+            <button
+              type="button"
               onclick={() => handleDeleteKey(key.id)}
               class="rounded-lg p-1.5 text-neutral-500 hover:text-rose-400 hover:bg-white/[0.06] transition cursor-pointer"
               title="Delete Key"
@@ -348,9 +399,15 @@
   {/if}
 </div>
 
+<svelte:window onkeydown={(e) => { if (e.key === 'Escape' && isAddOpen) isAddOpen = false; }} />
+
 <!-- Add / Generate Key Modal -->
 {#if isAddOpen}
-  <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4 overflow-y-auto">
+  <div
+    class="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4 overflow-y-auto"
+    onclick={(e) => { if (e.target === e.currentTarget) isAddOpen = false; }}
+    role="presentation"
+  >
     <div class="w-full max-w-lg rounded-2xl border border-[#28283a] bg-[#14141e] p-6 shadow-2xl space-y-4 animate-in fade-in zoom-in-95 duration-150 my-auto">
       <div class="flex items-start justify-between">
         <div class="flex items-center gap-3">
@@ -358,7 +415,7 @@
             <Key class="h-5 w-5" />
           </div>
           <div>
-            <h3 class="text-base font-bold text-white">Add SSH Key to Keychain</h3>
+            <h3 class="text-base font-bold text-white">{editingId ? 'Edit SSH Key' : 'Add SSH Key to Keychain'}</h3>
             <p class="text-xs text-neutral-400">Store reusable private keys encrypted client-side.</p>
           </div>
         </div>
@@ -392,7 +449,7 @@
             <select
               id="key-type"
               bind:value={newKeyType}
-              onchange={generateSampleKeyPair}
+              onchange={generateKeyPair}
               class="rounded-lg border border-[#252535] bg-[#0c0c12] px-2.5 py-1 text-white outline-none focus:border-emerald-500 cursor-pointer"
             >
               <option value="ED25519">ED25519 (Recommended)</option>
@@ -402,11 +459,12 @@
 
           <button
             type="button"
-            onclick={generateSampleKeyPair}
-            class="flex items-center gap-1.5 rounded-lg bg-emerald-600/20 border border-emerald-500/30 px-3 py-1 text-emerald-300 hover:bg-emerald-600/30 transition text-[11px] font-semibold cursor-pointer active:scale-95"
+            disabled={isGenerating}
+            onclick={generateKeyPair}
+            class="flex items-center gap-1.5 rounded-lg bg-emerald-600/20 border border-emerald-500/30 px-3 py-1 text-emerald-300 hover:bg-emerald-600/30 transition text-[11px] font-semibold cursor-pointer active:scale-95 disabled:opacity-50"
           >
             <Sparkles class="h-3 w-3" />
-            <span>Generate New Pair</span>
+            <span>{isGenerating ? 'Generating...' : 'Generate New Pair'}</span>
           </button>
         </div>
 

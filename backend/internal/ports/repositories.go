@@ -25,6 +25,7 @@ type VaultRepository interface {
 	AddMember(ctx context.Context, member *domain.VaultMember) error
 	GetMemberRole(ctx context.Context, vaultID, userID uuid.UUID) (domain.VaultRole, error)
 	ListMembers(ctx context.Context, vaultID uuid.UUID) ([]domain.VaultMember, error)
+	RemoveMember(ctx context.Context, vaultID, userID uuid.UUID) error
 	
 	// Item management
 	CreateItem(ctx context.Context, item *domain.VaultItem) error

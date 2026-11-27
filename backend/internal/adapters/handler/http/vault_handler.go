@@ -346,3 +346,32 @@ func (h *VaultHandler) ListMembers(w http.ResponseWriter, r *http.Request) {
 
 	writeJSON(w, http.StatusOK, members)
 }
+
+func (h *VaultHandler) RemoveMember(w http.ResponseWriter, r *http.Request) {
+	uid := getUserID(r)
+	vaultID, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		writeJSONError(w, http.StatusBadRequest, "invalid vault id")
+		return
+	}
+	targetUserID, err := uuid.Parse(r.PathValue("userId"))
+	if err != nil {
+		writeJSONError(w, http.StatusBadRequest, "invalid user id")
+		return
+	}
+
+	if err := h.vaultService.RemoveMember(r.Context(), uid, vaultID, targetUserID); err != nil {
+		if errors.Is(err, domain.ErrForbidden) {
+			writeJSONError(w, http.StatusForbidden, "insufficient permissions to remove this member")
+			return
+		}
+		if errors.Is(err, domain.ErrNotFound) {
+			writeJSONError(w, http.StatusNotFound, "member not found")
+			return
+		}
+		writeJSONError(w, http.StatusInternalServerError, "failed to remove member")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{"status": "removed"})
+}

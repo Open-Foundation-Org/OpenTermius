@@ -1,17 +1,23 @@
 <script lang="ts">
-  import { toast } from '../stores/toast.svelte';
+  import { toast, formatErrorMessage } from '../stores/toast.svelte';
   import { encryptVaultPayload, decryptVaultPayload } from '../crypto/vault';
   import {
     Network,
     Plus,
     RefreshCw,
     Trash2,
+    Pencil,
     Copy,
     Check,
     ArrowRight,
     Globe
   } from '@lucide/svelte';
-  import { api } from '../api/client';
+  import { api, type SftpHostConfig } from '../api/client';
+
+  interface TunnelHostItem extends SftpHostConfig {
+    id: string;
+    label: string;
+  }
 
   interface TunnelConfig {
     id: string;
@@ -28,7 +34,7 @@
 
   interface Props {
     activeVaultId?: string;
-    hosts?: Array<{ id: string; label: string; address: string }>;
+    hosts?: TunnelHostItem[];
   }
 
   let { activeVaultId, hosts = [] }: Props = $props();
@@ -39,7 +45,9 @@
 
   // Modal State
   let showModal = $state(false);
+  let editingId = $state<string | null>(null);
   let isSubmitting = $state(false);
+  let togglingId = $state<string | null>(null);
   let formError = $state<string | null>(null);
 
   // Form Fields
@@ -122,6 +130,7 @@
   }
 
   function openAddModal() {
+    editingId = null;
     formError = null;
     newLabel = '';
     newType = 'local';
@@ -130,6 +139,19 @@
     newRemoteHost = '127.0.0.1';
     newRemotePort = 5432;
     newAutoConnect = false;
+    showModal = true;
+  }
+
+  function openEditModal(tunnel: TunnelConfig) {
+    editingId = tunnel.id;
+    formError = null;
+    newLabel = tunnel.label;
+    newType = tunnel.type;
+    newHostId = tunnel.hostId || (hosts.length > 0 ? hosts[0].id : '');
+    newLocalPort = tunnel.localPort;
+    newRemoteHost = tunnel.remoteHost || '127.0.0.1';
+    newRemotePort = tunnel.remotePort || 5432;
+    newAutoConnect = Boolean(tunnel.autoConnect);
     showModal = true;
   }
 
@@ -174,33 +196,59 @@
       };
 
       const { ciphertext, nonce } = await encryptVaultPayload(payload, api.getVaultSecret(targetVaultId));
-
-      const created = await api.createVaultItem(targetVaultId, {
-        kind: 'tunnel',
-        label: newLabel.trim(),
-        ciphertext,
-        nonce
-      });
-
       const matchedHost = hosts.find((h) => h.id === newHostId);
-      tunnels = [
-        ...tunnels,
-        {
-          id: created.id,
+
+      if (editingId) {
+        await api.updateVaultItem(targetVaultId, editingId, {
           label: newLabel.trim(),
-          type: newType,
-          hostId: newHostId,
-          hostLabel: matchedHost?.label || 'SSH Host',
-          localPort: newLocalPort,
-          remoteHost: newRemoteHost.trim() || '127.0.0.1',
-          remotePort: newRemotePort || 5432,
-          autoConnect: newAutoConnect,
-          isActive: false
-        }
-      ];
+          ciphertext,
+          nonce
+        });
+        tunnels = tunnels.map((t) =>
+          t.id === editingId
+            ? {
+                ...t,
+                label: newLabel.trim(),
+                type: newType,
+                hostId: newHostId,
+                hostLabel: matchedHost?.label || 'SSH Host',
+                localPort: newLocalPort,
+                remoteHost: newRemoteHost.trim() || '127.0.0.1',
+                remotePort: newRemotePort || 5432,
+                autoConnect: newAutoConnect
+              }
+            : t
+        );
+        toast.success('Tunnel updated.');
+      } else {
+        const created = await api.createVaultItem(targetVaultId, {
+          kind: 'tunnel',
+          label: newLabel.trim(),
+          ciphertext,
+          nonce
+        });
+
+        tunnels = [
+          ...tunnels,
+          {
+            id: created.id,
+            label: newLabel.trim(),
+            type: newType,
+            hostId: newHostId,
+            hostLabel: matchedHost?.label || 'SSH Host',
+            localPort: newLocalPort,
+            remoteHost: newRemoteHost.trim() || '127.0.0.1',
+            remotePort: newRemotePort || 5432,
+            autoConnect: newAutoConnect,
+            isActive: false
+          }
+        ];
+        toast.success('Tunnel saved.');
+      }
 
       loadState = 'success';
       showModal = false;
+      editingId = null;
     } catch (err: unknown) {
       formError = err instanceof Error ? err.message : 'Failed to save tunnel to backend.';
     } finally {
@@ -226,13 +274,37 @@
     }
   }
 
-  function toggleTunnelActive(id: string) {
-    tunnels = tunnels.map((t) => {
-      if (t.id === id) {
-        return { ...t, isActive: !t.isActive };
+  async function toggleTunnelActive(tunnel: TunnelConfig) {
+    if (togglingId === tunnel.id) return;
+    togglingId = tunnel.id;
+
+    try {
+      if (tunnel.isActive) {
+        await api.tunnelStop(tunnel.id);
+        tunnels = tunnels.map((t) => (t.id === tunnel.id ? { ...t, isActive: false } : t));
+        toast.info(`Stopped tunnel "${tunnel.label}".`);
+      } else {
+        const targetHost = hosts.find((h) => h.id === tunnel.hostId);
+        if (!targetHost) {
+          toast.error('SSH host for this tunnel was not found.');
+          return;
+        }
+        await api.tunnelStart({
+          tunnelId: tunnel.id,
+          tunnelType: tunnel.type,
+          localPort: tunnel.localPort,
+          remoteHost: tunnel.remoteHost,
+          remotePort: tunnel.remotePort,
+          host: targetHost
+        });
+        tunnels = tunnels.map((t) => (t.id === tunnel.id ? { ...t, isActive: true } : t));
+        toast.success(`Tunnel active on 127.0.0.1:${tunnel.localPort}`);
       }
-      return t;
-    });
+    } catch (err: unknown) {
+      toast.error(formatErrorMessage(err, 'Failed to toggle SSH tunnel'));
+    } finally {
+      togglingId = null;
+    }
   }
 
   function copyConnectionString(tunnel: TunnelConfig) {
@@ -341,11 +413,12 @@
             <!-- Active Switch / Badge -->
             <button
               type="button"
-              onclick={() => toggleTunnelActive(tunnel.id)}
-              class="flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium transition {tunnel.isActive ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'bg-neutral-800 text-neutral-400 hover:text-white'}"
+              disabled={togglingId === tunnel.id}
+              onclick={() => toggleTunnelActive(tunnel)}
+              class="flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium transition cursor-pointer disabled:opacity-50 {tunnel.isActive ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'bg-neutral-800 text-neutral-400 hover:text-white'}"
             >
               <span class="h-1.5 w-1.5 rounded-full {tunnel.isActive ? 'bg-emerald-400 animate-pulse' : 'bg-neutral-500'}"></span>
-              {tunnel.isActive ? 'Active' : 'Inactive'}
+              {togglingId === tunnel.id ? 'Starting...' : tunnel.isActive ? 'Active' : 'Inactive'}
             </button>
           </div>
 
@@ -388,14 +461,24 @@
               {/if}
             </button>
 
-            <button
-              type="button"
-              onclick={() => handleDeleteTunnel(tunnel.id)}
-              class="text-neutral-500 hover:text-rose-400 p-1 transition"
-              title="Delete tunnel"
-            >
-              <Trash2 class="w-3.5 h-3.5" />
-            </button>
+            <div class="flex items-center gap-1">
+              <button
+                type="button"
+                onclick={() => openEditModal(tunnel)}
+                class="text-neutral-500 hover:text-emerald-400 p-1 transition cursor-pointer"
+                title="Edit tunnel"
+              >
+                <Pencil class="w-3.5 h-3.5" />
+              </button>
+              <button
+                type="button"
+                onclick={() => handleDeleteTunnel(tunnel.id)}
+                class="text-neutral-500 hover:text-rose-400 p-1 transition cursor-pointer"
+                title="Delete tunnel"
+              >
+                <Trash2 class="w-3.5 h-3.5" />
+              </button>
+            </div>
           </div>
         </div>
       {/each}
@@ -403,9 +486,15 @@
   {/if}
 </div>
 
+<svelte:window onkeydown={(e) => { if (e.key === 'Escape' && showModal) showModal = false; }} />
+
 <!-- Add Tunnel Modal -->
 {#if showModal}
-  <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4 overflow-y-auto">
+  <div
+    class="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4 overflow-y-auto"
+    onclick={(e) => { if (e.target === e.currentTarget) showModal = false; }}
+    role="presentation"
+  >
     <div class="w-full max-w-md max-h-[85dvh] overflow-y-auto rounded-2xl border border-[#262635] bg-[#14141d] p-4 sm:p-6 shadow-2xl space-y-4 animate-in fade-in zoom-in-95 duration-150 my-auto">
       <div class="flex items-center justify-between border-b border-[#22222e] pb-3">
         <div class="flex items-center gap-2.5">
@@ -413,7 +502,7 @@
             <Network class="w-4 h-4" />
           </div>
           <div>
-            <h3 class="text-sm font-bold text-white">New Tunnel</h3>
+            <h3 class="text-sm font-bold text-white">{editingId ? 'Edit Tunnel' : 'New Tunnel'}</h3>
             <p class="text-[11px] text-neutral-400">Route TCP traffic through an SSH host.</p>
           </div>
         </div>

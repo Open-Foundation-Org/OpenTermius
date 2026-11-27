@@ -21,6 +21,7 @@ export interface GatewayMember {
   id: string;
   vault_id: string;
   user_id: string;
+  name?: string;
   email?: string;
   role: 'owner' | 'admin' | 'member';
   created_at: string;
@@ -322,6 +323,12 @@ class GatewayApiClient {
     return this.request<GatewayMember>(`/vaults/${vaultId}/members`, {
       method: 'POST',
       body: JSON.stringify({ email, role })
+    });
+  }
+
+  async removeMember(vaultId: string, userId: string): Promise<void> {
+    await this.request<{ status: string }>(`/vaults/${vaultId}/members/${encodeURIComponent(userId)}`, {
+      method: 'DELETE'
     });
   }
 

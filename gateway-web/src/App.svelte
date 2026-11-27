@@ -29,7 +29,9 @@
     Mail,
     Send,
     Copy,
-    Check
+    Check,
+    Eye,
+    EyeOff
   } from '@lucide/svelte';
 
   type TabId = 'overview' | 'users' | 'teams' | 'settings';
@@ -43,8 +45,15 @@
   // Auth Form State (no hardcoded credentials exposed in UI)
   let authEmail = $state('');
   let authPassword = $state('');
+  let showAuthPassword = $state(false);
   let authError = $state<string | null>(null);
   let isAuthSubmitting = $state(false);
+  let confirmDialog = $state<{
+    title: string;
+    message: string;
+    confirmLabel: string;
+    onConfirm: () => Promise<void>;
+  } | null>(null);
 
   // Gateway Data State
   let backendUrl = $state(gatewayApi.getApiBase());
@@ -162,6 +171,7 @@
 
   function handleWindowKeydown(e: KeyboardEvent) {
     if (e.key === 'Escape') {
+      confirmDialog = null;
       isCreateUserOpen = false;
       isCreateVaultOpen = false;
       isInviteOpen = false;
@@ -311,17 +321,41 @@
     }
   }
 
-  async function handleDeleteUser(u: GatewayUser) {
+  function handleDeleteUser(u: GatewayUser) {
     if (u.id === currentUser?.id) return;
-    if (!confirm(`Delete user "${u.name}" (${u.email})?`)) return;
+    confirmDialog = {
+      title: 'Delete User',
+      message: `Delete user "${u.name}" (${u.email})? This cannot be undone.`,
+      confirmLabel: 'Delete',
+      onConfirm: async () => {
+        try {
+          await gatewayApi.deleteUser(u.id);
+          users = users.filter((item) => item.id !== u.id);
+          showBanner(`Deleted ${u.email}.`);
+        } catch (err: unknown) {
+          errorMessage = err instanceof Error ? err.message : 'Failed to delete user';
+        }
+      }
+    };
+  }
 
-    try {
-      await gatewayApi.deleteUser(u.id);
-      users = users.filter((item) => item.id !== u.id);
-      showBanner(`Deleted ${u.email}.`);
-    } catch (err: unknown) {
-      errorMessage = err instanceof Error ? err.message : 'Failed to delete user';
-    }
+  function handleRemoveVaultMember(member: GatewayMember) {
+    if (!selectedTeamVaultId || member.role === 'owner') return;
+    const display = member.name || member.email || member.user_id;
+    confirmDialog = {
+      title: 'Remove Vault Member',
+      message: `Remove "${display}" from this team vault?`,
+      confirmLabel: 'Remove',
+      onConfirm: async () => {
+        try {
+          await gatewayApi.removeMember(selectedTeamVaultId, member.user_id);
+          teamMembers = teamMembers.filter((m) => m.id !== member.id);
+          showBanner(`Removed ${display} from team vault.`);
+        } catch (err: unknown) {
+          errorMessage = err instanceof Error ? err.message : 'Failed to remove member';
+        }
+      }
+    };
   }
 
   async function handleCreateTeamVault(e?: SubmitEvent) {
@@ -405,15 +439,21 @@
     }
   }
 
-  async function handleRevokeInvite(inv: GatewayUserInvite) {
-    if (!confirm(`Revoke invite for ${inv.email}?`)) return;
-    try {
-      await gatewayApi.deleteInvite(inv.id);
-      pendingInvites = pendingInvites.filter((i) => i.id !== inv.id);
-      showBanner(`Revoked invite for ${inv.email}.`);
-    } catch (err: unknown) {
-      errorMessage = err instanceof Error ? err.message : 'Failed to revoke invite';
-    }
+  function handleRevokeInvite(inv: GatewayUserInvite) {
+    confirmDialog = {
+      title: 'Revoke Invite',
+      message: `Revoke invite for ${inv.email}?`,
+      confirmLabel: 'Revoke',
+      onConfirm: async () => {
+        try {
+          await gatewayApi.deleteInvite(inv.id);
+          pendingInvites = pendingInvites.filter((i) => i.id !== inv.id);
+          showBanner(`Revoked invite for ${inv.email}.`);
+        } catch (err: unknown) {
+          errorMessage = err instanceof Error ? err.message : 'Failed to revoke invite';
+        }
+      }
+    };
   }
 
   async function handleResendInvite(inv: GatewayUserInvite) {
@@ -818,15 +858,29 @@
               </div>
               <div>
                 <label for="adm-pw" class="block font-medium text-neutral-400 mb-1">Password</label>
-                <input
-                  id="adm-pw"
-                  type="password"
-                  required
-                  autocomplete="current-password"
-                  bind:value={authPassword}
-                  placeholder="Enter password"
-                  class="w-full rounded-lg border border-white/[0.08] bg-[#0b0b10] px-3 py-2 text-white outline-none focus:border-emerald-500/70"
-                />
+                <div class="relative">
+                  <input
+                    id="adm-pw"
+                    type={showAuthPassword ? 'text' : 'password'}
+                    required
+                    autocomplete="current-password"
+                    bind:value={authPassword}
+                    placeholder="Enter password"
+                    class="w-full rounded-lg border border-white/[0.08] bg-[#0b0b10] pl-3 pr-9 py-2 text-white outline-none focus:border-emerald-500/70"
+                  />
+                  <button
+                    type="button"
+                    onclick={() => (showAuthPassword = !showAuthPassword)}
+                    class="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 text-neutral-400 hover:text-white transition cursor-pointer"
+                    aria-label={showAuthPassword ? 'Hide password' : 'Show password'}
+                  >
+                    {#if showAuthPassword}
+                      <EyeOff class="h-3.5 w-3.5" />
+                    {:else}
+                      <Eye class="h-3.5 w-3.5" />
+                    {/if}
+                  </button>
+                </div>
               </div>
 
               <button
@@ -1124,31 +1178,54 @@
                   <th class="px-4 py-2.5 font-medium">Member</th>
                   <th class="px-4 py-2.5 font-medium">Role</th>
                   <th class="px-4 py-2.5 font-medium">Added</th>
+                  <th class="px-4 py-2.5 font-medium text-right">Actions</th>
                 </tr>
               </thead>
               <tbody class="divide-y divide-white/[0.05]">
                 {#if teamVaults.length === 0}
                   <tr>
-                    <td colspan="3" class="p-6 text-center text-neutral-500">
+                    <td colspan="4" class="p-6 text-center text-neutral-500">
                       No team vaults yet. Click "New Vault" to create one.
                     </td>
                   </tr>
                 {:else if teamMembers.length === 0}
                   <tr>
-                    <td colspan="3" class="p-6 text-center text-neutral-500">
+                    <td colspan="4" class="p-6 text-center text-neutral-500">
                       No members in this vault yet.
                     </td>
                   </tr>
                 {:else}
                   {#each teamMembers as member (member.id)}
                     <tr class="hover:bg-white/[0.02] transition">
-                      <td class="px-4 py-2.5 font-mono text-white">{member.email || member.user_id}</td>
+                      <td class="px-4 py-2.5">
+                        {#if member.name || member.email}
+                          <p class="font-medium text-white">{member.name || member.email}</p>
+                          {#if member.name && member.email}
+                            <p class="font-mono text-[11px] text-neutral-400">{member.email}</p>
+                          {/if}
+                        {:else}
+                          <span class="font-mono text-white">{member.user_id}</span>
+                        {/if}
+                      </td>
                       <td class="px-4 py-2.5">
                         <span class="rounded px-2 py-0.5 text-[10px] font-semibold uppercase {member.role === 'owner' ? 'bg-amber-500/15 text-amber-300 border border-amber-500/30' : 'bg-emerald-500/12 text-emerald-300 border border-emerald-500/25'}">
                           {member.role}
                         </span>
                       </td>
                       <td class="px-4 py-2.5 text-neutral-400">{new Date(member.created_at).toLocaleDateString()}</td>
+                      <td class="px-4 py-2.5 text-right">
+                        {#if member.role !== 'owner'}
+                          <button
+                            type="button"
+                            onclick={() => handleRemoveVaultMember(member)}
+                            class="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] text-neutral-400 hover:text-rose-400 hover:bg-rose-500/10 transition cursor-pointer"
+                          >
+                            <Trash2 class="h-3.5 w-3.5" /> Remove
+                          </button>
+                        {:else}
+                          <span class="text-[10px] text-neutral-500">Owner</span>
+                        {/if}
+                      </td>
                     </tr>
                   {/each}
                 {/if}
@@ -1695,6 +1772,46 @@
         </button>
       </div>
     </form>
+  </div>
+{/if}
+
+{#if confirmDialog}
+  <div
+    class="fixed inset-0 z-[70] flex items-center justify-center bg-black/75 backdrop-blur-xs p-4"
+    onclick={(e) => { if (e.target === e.currentTarget) confirmDialog = null; }}
+    role="presentation"
+  >
+    <div class="w-full max-w-sm rounded-2xl border border-white/[0.08] bg-[#13131b] p-5 shadow-2xl space-y-4 text-xs">
+      <div class="flex items-start gap-3">
+        <div class="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-rose-500/15 text-rose-400 border border-rose-500/25">
+          <AlertCircle class="h-4.5 w-4.5" />
+        </div>
+        <div class="space-y-1">
+          <h3 class="text-sm font-semibold text-white">{confirmDialog.title}</h3>
+          <p class="text-neutral-300 leading-relaxed">{confirmDialog.message}</p>
+        </div>
+      </div>
+      <div class="flex justify-end gap-2 pt-2 border-t border-white/[0.06]">
+        <button
+          type="button"
+          onclick={() => (confirmDialog = null)}
+          class="px-3.5 py-1.5 rounded-lg border border-white/[0.08] text-neutral-300 hover:text-white transition cursor-pointer"
+        >
+          Cancel
+        </button>
+        <button
+          type="button"
+          onclick={async () => {
+            const fn = confirmDialog?.onConfirm;
+            confirmDialog = null;
+            if (fn) await fn();
+          }}
+          class="px-4 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-500 text-white font-semibold transition cursor-pointer"
+        >
+          {confirmDialog.confirmLabel}
+        </button>
+      </div>
+    </div>
   </div>
 {/if}
 {/if}

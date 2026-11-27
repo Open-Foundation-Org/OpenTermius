@@ -215,6 +215,8 @@ func (v *VaultUseCase) InviteMember(ctx context.Context, callerID, vaultID uuid.
 		ID:                uuid.New(),
 		VaultID:           vaultID,
 		UserID:            targetUser.ID,
+		Name:              targetUser.Name,
+		Email:             targetUser.Email,
 		Role:              normalizedRole,
 		EncryptedVaultKey: vault.EncryptedKey,
 		CreatedAt:         time.Now().UTC(),
@@ -233,4 +235,22 @@ func (v *VaultUseCase) ListMembers(ctx context.Context, callerID, vaultID uuid.U
 		return nil, domain.ErrForbidden
 	}
 	return v.vaultRepo.ListMembers(ctx, vaultID)
+}
+
+func (v *VaultUseCase) RemoveMember(ctx context.Context, callerID, vaultID, targetUserID uuid.UUID) error {
+	callerRole, err := v.vaultRepo.GetMemberRole(ctx, vaultID, callerID)
+	if err != nil || (callerRole != domain.VaultRoleOwner && callerRole != domain.VaultRoleAdmin) {
+		return domain.ErrForbidden
+	}
+	targetRole, err := v.vaultRepo.GetMemberRole(ctx, vaultID, targetUserID)
+	if err != nil {
+		return domain.ErrNotFound
+	}
+	if targetRole == domain.VaultRoleOwner {
+		return domain.ErrForbidden
+	}
+	if callerRole == domain.VaultRoleAdmin && targetRole != domain.VaultRoleMember {
+		return domain.ErrForbidden
+	}
+	return v.vaultRepo.RemoveMember(ctx, vaultID, targetUserID)
 }

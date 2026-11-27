@@ -124,8 +124,8 @@
           ? initialHost.tags.join(', ')
           : initialHost.tags || '';
         selectedIdentityId = initialHost.identityId || '';
-        selectedKeyId = '';
-        credMode = initialHost.identityId ? 'identity' : 'manual';
+        selectedKeyId = initialHost.keyId || '';
+        credMode = initialHost.identityId ? 'identity' : initialHost.keyId ? 'keychain' : 'manual';
         if (initialHost.proxy) {
           proxyMode = initialHost.proxy.mode || 'none';
           proxyJumpHostId = initialHost.proxy.jumpHostId || '';
@@ -138,9 +138,7 @@
           proxyPort = 1080;
         }
         showAdvanced = Boolean(
-          initialHost.proxy ||
-            initialHost.useMosh ||
-            (initialHost.group && initialHost.group !== 'Default') ||
+          (initialHost.group && initialHost.group !== 'Default') ||
             (Array.isArray(initialHost.tags) && initialHost.tags.length > 0)
         );
       } else {
@@ -184,32 +182,30 @@
       username: username.trim() || 'root',
       authType,
       identityId: credMode === 'identity' ? selectedIdentityId : '',
+      keyId: credMode === 'keychain' ? selectedKeyId : '',
       password: authType === 'password' ? password : '',
       privateKey: authType === 'key' ? privateKey : '',
       passphrase: authType === 'key' ? passphrase : '',
-      useMosh,
+      useMosh: false,
       group: group || 'Default',
       tags: tags
         .split(',')
         .map((t) => t.trim())
         .filter(Boolean),
-      pingMs: initialHost?.pingMs || Math.floor(Math.random() * 25) + 10,
-      proxy:
-        proxyMode === 'none'
-          ? undefined
-          : {
-              mode: proxyMode,
-              jumpHostId: proxyJumpHostId,
-              host: proxyHost,
-              port: proxyPort
-            }
+      pingMs: initialHost?.pingMs || Math.floor(Math.random() * 25) + 10
     });
     onClose();
   }
 </script>
 
+<svelte:window onkeydown={(e) => { if (e.key === 'Escape' && isOpen) onClose(); }} />
+
 {#if isOpen}
-  <div class="fixed inset-0 z-50 flex items-stretch sm:items-center justify-center bg-[#0e0e14] sm:bg-black/75 sm:backdrop-blur-sm p-0 sm:p-4 overflow-y-auto">
+  <div
+    class="fixed inset-0 z-50 flex items-stretch sm:items-center justify-center bg-[#0e0e14] sm:bg-black/75 sm:backdrop-blur-sm p-0 sm:p-4 overflow-y-auto"
+    onclick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+    role="presentation"
+  >
     <div class="w-full h-full sm:h-auto sm:max-w-lg sm:max-h-[85dvh] flex flex-col overflow-y-auto rounded-none sm:rounded-2xl sm:border sm:border-[#262635] bg-[#14141d] p-5 pb-[calc(1.25rem+var(--sab))] sm:p-6 shadow-2xl space-y-5 animate-in fade-in duration-150 sm:my-auto">
       <div class="flex items-center justify-between">
         <div class="flex items-center gap-3">
@@ -422,7 +418,7 @@
           onclick={() => (showAdvanced = !showAdvanced)}
           class="flex w-full items-center justify-between rounded-xl border border-[#22222e] bg-[#0e0e16] px-3 py-2.5 text-xs font-medium text-neutral-300 hover:text-white transition"
         >
-          <span>More Options (Folder, Tags, Proxy, Mosh)</span>
+          <span>More Options (Folder, Tags)</span>
           {#if showAdvanced}
             <ChevronDown class="h-4 w-4 text-emerald-400" />
           {:else}
@@ -453,74 +449,6 @@
                   class="w-full rounded-xl border border-[#252535] bg-[#0e0e14] px-3 py-2 text-white placeholder-neutral-500 outline-none focus:border-emerald-500"
                 />
               </div>
-            </div>
-
-            <!-- Proxy & Jump Host Section -->
-            <div class="rounded-xl border border-[#22222e] bg-[#0e0e16] p-3 space-y-3">
-              <div class="flex items-center justify-between">
-                <div class="flex items-center gap-2">
-                  <Network class="h-4 w-4 text-emerald-400" />
-                  <span class="font-medium text-white text-xs">Proxy / Jump Host</span>
-                </div>
-                <select
-                  bind:value={proxyMode}
-                  class="rounded-lg border border-[#282838] bg-[#14141d] px-2 py-1 text-[11px] text-neutral-200 outline-none focus:border-emerald-500"
-                >
-                  <option value="none">Direct</option>
-                  <option value="jump_host">Jump Host</option>
-                  <option value="socks5">SOCKS5</option>
-                  <option value="http">HTTP Proxy</option>
-                </select>
-              </div>
-
-              {#if proxyMode === 'jump_host'}
-                <div class="pt-2 border-t border-[#1e1e28] text-xs">
-                  {#if vaultHosts.length === 0}
-                    <p class="text-[11px] text-amber-400/90">No other hosts in vault to act as bastion.</p>
-                  {:else}
-                    <select
-                      id="proxy-bastion-select"
-                      bind:value={proxyJumpHostId}
-                      class="w-full rounded-lg border border-[#282838] bg-[#0a0a10] px-3 py-2 text-xs text-white outline-none focus:border-emerald-500"
-                    >
-                      <option value="">-- Choose Jump Host --</option>
-                      {#each vaultHosts as vh}
-                        <option value={vh.id}>{vh.label}</option>
-                      {/each}
-                    </select>
-                  {/if}
-                </div>
-              {:else if proxyMode === 'socks5' || proxyMode === 'http'}
-                <div class="pt-2 border-t border-[#1e1e28] grid grid-cols-3 gap-2 text-xs">
-                  <input
-                    id="proxy-target-host"
-                    type="text"
-                    bind:value={proxyHost}
-                    placeholder="127.0.0.1"
-                    class="col-span-2 w-full rounded-lg border border-[#282838] bg-[#0a0a10] px-2.5 py-2 text-xs text-white outline-none focus:border-emerald-500"
-                  />
-                  <input
-                    id="proxy-target-port"
-                    type="number"
-                    bind:value={proxyPort}
-                    placeholder="1080"
-                    class="w-full rounded-lg border border-[#282838] bg-[#0a0a10] px-2.5 py-2 text-xs text-white outline-none focus:border-emerald-500 font-mono"
-                  />
-                </div>
-              {/if}
-            </div>
-
-            <!-- Mosh option -->
-            <div class="rounded-xl border border-[#22222e] bg-[#0e0e16] p-3 flex items-center justify-between">
-              <div class="flex items-center gap-2">
-                <Radio class="h-4 w-4 text-indigo-400" />
-                <span class="font-medium text-white">Enable Mosh Protocol</span>
-              </div>
-              <input
-                type="checkbox"
-                bind:checked={useMosh}
-                class="h-4 w-4 accent-emerald-500 rounded cursor-pointer"
-              />
             </div>
           </div>
         {/if}

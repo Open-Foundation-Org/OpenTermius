@@ -37,6 +37,8 @@ export interface ApiVaultMember {
   id: string;
   vault_id: string;
   user_id: string;
+  name?: string;
+  email?: string;
   role: 'owner' | 'admin' | 'member';
   created_at: string;
 }
@@ -869,6 +871,13 @@ class ApiClient {
     });
   }
 
+  async removeVaultMember(vaultId: string, userId: string): Promise<void> {
+    if (this.standalone) return;
+    await this.request<{ status: string }>(`/vaults/${vaultId}/members/${encodeURIComponent(userId)}`, {
+      method: 'DELETE'
+    });
+  }
+
   // Presence & Remote Collaboration Relay (Zero-SSH Blind Relay)
   getDeviceId(): string {
     if (typeof window === 'undefined') return 'server';
@@ -1021,6 +1030,50 @@ class ApiClient {
       path: targetPath,
       data: bytes
     });
+  }
+
+  async sftpRename(config: SftpHostConfig, oldPath: string, newPath: string): Promise<void> {
+    const { invoke } = await import('@tauri-apps/api/core');
+    await invoke('sftp_rename', {
+      config: this.toNativeSftpConfig(config),
+      oldPath,
+      newPath
+    });
+  }
+
+  async sshGenerateKeypair(keyType: string, passphrase?: string): Promise<{ publicKey: string; privateKey: string }> {
+    const { invoke } = await import('@tauri-apps/api/core');
+    return invoke<{ publicKey: string; privateKey: string }>('ssh_generate_keypair', {
+      keyType,
+      passphrase: passphrase || null
+    });
+  }
+
+  async tunnelStart(config: {
+    tunnelId: string;
+    tunnelType: 'local' | 'dynamic' | 'remote';
+    localPort: number;
+    remoteHost?: string;
+    remotePort?: number;
+    host: SftpHostConfig;
+  }): Promise<void> {
+    const { invoke } = await import('@tauri-apps/api/core');
+    const nativeHost = this.toNativeSftpConfig(config.host);
+    await invoke('tunnel_start', {
+      config: {
+        tunnelId: config.tunnelId,
+        tunnelType: config.tunnelType,
+        localPort: config.localPort,
+        remoteHost: config.remoteHost || null,
+        remotePort: config.remotePort || null,
+        ...nativeHost
+      }
+    });
+  }
+
+  async tunnelStop(tunnelId: string): Promise<void> {
+    const { invoke } = await import('@tauri-apps/api/core');
+    await invoke('tunnel_stop', { tunnelId });
   }
 }
 

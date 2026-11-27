@@ -81,9 +81,12 @@
   let isQuickConnectOpen = $state(false);
   let isShortcutsOpen = $state(false);
   let quickConnectQuery = $state('');
+  let quickConnectIdx = $state(0);
   let quickConnectInput = $state<HTMLInputElement | null>(null);
   let splitSearchQuery = $state('');
+  let splitSearchIdx = $state(0);
   let splitSearchInput = $state<HTMLInputElement | null>(null);
+  let pendingSnippetScript = $state<string | null>(null);
   let isTerminalFocus = $state(false);
   let sftpSelectedHostId = $state('');
   let currentUserId = $state('');
@@ -101,6 +104,7 @@
   function openQuickConnect() {
     if (!isAuthenticated) return;
     quickConnectQuery = '';
+    quickConnectIdx = 0;
     isQuickConnectOpen = true;
     setTimeout(() => quickConnectInput?.focus(), 20);
   }
@@ -151,6 +155,7 @@
     const inTerminal = activeNav === 'terminal';
 
     if (e.key === 'Escape') {
+      if (pendingSnippetScript !== null) { e.preventDefault(); pendingSnippetScript = null; return; }
       if (isShortcutsOpen) { e.preventDefault(); isShortcutsOpen = false; return; }
       if (isQuickConnectOpen) { e.preventDefault(); isQuickConnectOpen = false; return; }
       return;
@@ -284,8 +289,8 @@
 
   // Auth State
   let isAuthenticated = $state(api.isStandalone() || Boolean(api.getToken()));
-  let authEmail = $state('admin@opentermius.local');
-  let authPassword = $state('OpenTermius2026!');
+  let authEmail = $state(typeof window !== 'undefined' ? localStorage.getItem('opentermius_last_email') || '' : '');
+  let authPassword = $state('');
   let authError = $state<string | null>(null);
   let isAuthLoading = $state(false);
 
@@ -427,11 +432,12 @@
   async function loadHosts(silent = false) {
     if (!activeVault) return;
     try {
-      const [items, identityItems] = await Promise.all([
+      const [items, identityItems, keyItems] = await Promise.all([
         api.getVaultItems(activeVault.id, 'host'),
-        api.getVaultItems(activeVault.id, 'identity').catch(() => [])
+        api.getVaultItems(activeVault.id, 'identity').catch(() => []),
+        api.getVaultItems(activeVault.id, 'key').catch(() => [])
       ]);
-      const fingerprint = `${activeVault.id}|${items.map((i) => `${i.id}:${i.version}:${i.updated_at}:${i.label}`).join(',')}|${identityItems.map((i) => `${i.id}:${i.version}:${i.updated_at}`).join(',')}`;
+      const fingerprint = `${activeVault.id}|${items.map((i) => `${i.id}:${i.version}:${i.updated_at}:${i.label}`).join(',')}|${identityItems.map((i) => `${i.id}:${i.version}:${i.updated_at}`).join(',')}|${keyItems.map((i) => `${i.id}:${i.version}:${i.updated_at}`).join(',')}`;
       if (silent && fingerprint === lastHostsFingerprint && (hosts.length > 0 || items.length === 0)) {
         return;
       }
@@ -443,7 +449,19 @@
         return;
       }
 
-      // Resolve linked identities live so updating an Identity updates all hosts referencing it
+      // Resolve linked keys & identities live so updating a Key or Identity updates all hosts referencing it
+      const keyMap = new Map<string, any>();
+      await Promise.all(
+        keyItems.map(async (kItem) => {
+          const parsedKey = await decryptVaultPayload<any>(
+            kItem.ciphertext,
+            kItem.nonce,
+            activeVault?.encrypted_key
+          );
+          if (parsedKey) keyMap.set(kItem.id, parsedKey);
+        })
+      );
+
       const identityMap = new Map<string, any>();
       await Promise.all(
         identityItems.map(async (idItem) => {
@@ -464,6 +482,8 @@
             activeVault?.encrypted_key
           );
           const linkedId = parsed?.identityId ? identityMap.get(parsed.identityId) : null;
+          const resolvedKeyId = linkedId?.keyId || parsed?.keyId || '';
+          const linkedKey = resolvedKeyId ? keyMap.get(resolvedKeyId) : null;
           const resolvedAuthType = linkedId?.authType || parsed?.authType || 'password';
           return {
             id: item.id,
@@ -473,17 +493,18 @@
             username: linkedId?.username || parsed?.username || 'root',
             authType: resolvedAuthType,
             identityId: parsed?.identityId || '',
+            keyId: parsed?.keyId || '',
             password:
               resolvedAuthType === 'password'
                 ? (linkedId ? linkedId.password || '' : parsed?.password || '')
                 : '',
             privateKey:
               resolvedAuthType === 'key'
-                ? (linkedId ? linkedId.privateKey || '' : parsed?.privateKey || '')
+                ? (linkedKey ? linkedKey.privateKey || '' : (linkedId ? linkedId.privateKey || '' : parsed?.privateKey || ''))
                 : '',
             passphrase:
               resolvedAuthType === 'key'
-                ? (linkedId ? linkedId.passphrase || '' : parsed?.passphrase || '')
+                ? (linkedKey ? linkedKey.passphrase || '' : (linkedId ? linkedId.passphrase || '' : parsed?.passphrase || ''))
                 : '',
             tags: parsed?.tags || [],
             group: parsed?.group || 'Default',
@@ -508,6 +529,10 @@
     try {
       api.setGateway(gatewayApiUrl.trim());
       await api.login(authEmail, authPassword);
+      if (typeof window !== 'undefined' && authEmail.trim()) {
+        localStorage.setItem('opentermius_last_email', authEmail.trim());
+      }
+      authPassword = '';
       const migrated = await api.syncStandaloneToGateway();
       if (migrated > 0) {
         toast.success(`Synced ${migrated} local item(s) to your Personal Vault.`);
@@ -552,6 +577,7 @@
         username: hostData.username,
         authType: hostData.authType,
         identityId: hostData.identityId || '',
+        keyId: hostData.keyId || '',
         password: hostData.password,
         privateKey: hostData.privateKey,
         passphrase: hostData.passphrase,
@@ -655,6 +681,8 @@
           port: targetHost.port,
           username: targetHost.username,
           authType: targetHost.authType,
+          identityId: targetHost.identityId || '',
+          keyId: targetHost.keyId || '',
           password: targetHost.password,
           privateKey: targetHost.privateKey,
           passphrase: targetHost.passphrase,
@@ -716,6 +744,7 @@
   function handleSplitTerminal(direction: 'horizontal' | 'vertical') {
     if (!terminalStore.activeTab) return;
     splitSearchQuery = '';
+    splitSearchIdx = 0;
     terminalStore.openSplitPicker(direction);
     setTimeout(() => splitSearchInput?.focus(), 30);
   }
@@ -981,7 +1010,7 @@
     (window as any).AndroidClipboard?.setKeepAliveSessions?.(count);
   });
 
-  const APP_VERSION = '0.6.3';
+  const APP_VERSION = '0.7.0';
   type DesktopUpdate = Awaited<ReturnType<typeof import('@tauri-apps/plugin-updater').check>>;
   let availableUpdate = $state<DesktopUpdate | null>(null);
   let releaseFallback = $state<{ version: string; url: string } | null>(null);
@@ -1775,7 +1804,7 @@
                 Retry Connection
               </button>
             </div>
-          {:else if loadState === 'empty' || filteredHosts.length === 0}
+          {:else if loadState === 'empty'}
             <div class="flex flex-col items-center justify-center p-12 text-center rounded-xl border border-[#22222a] bg-[#14141a]">
               <Server class="h-10 w-10 text-neutral-600 mb-3" />
               <p class="text-sm font-semibold text-white">No hosts</p>
@@ -1790,6 +1819,24 @@
                 class="mt-4 rounded-lg bg-emerald-600 px-4 py-1.5 text-xs font-semibold text-white hover:bg-emerald-500"
               >
                 Add Host
+              </button>
+            </div>
+          {:else if displayedHosts.length === 0}
+            <div class="flex flex-col items-center justify-center p-12 text-center rounded-xl border border-[#22222a] bg-[#14141a]">
+              <Search class="h-9 w-9 text-neutral-600 mb-3" />
+              <p class="text-sm font-semibold text-white">No matching hosts</p>
+              <p class="text-xs text-neutral-400 mt-1">
+                No hosts match {searchQuery ? `"${searchQuery}"` : `folder "${selectedFolderFilter}"`}.
+              </p>
+              <button
+                type="button"
+                onclick={() => {
+                  searchQuery = '';
+                  selectedFolderFilter = 'all';
+                }}
+                class="mt-4 rounded-lg border border-white/[0.1] bg-[#1a1a24] px-4 py-1.5 text-xs font-semibold text-neutral-200 hover:bg-[#242432] transition cursor-pointer"
+              >
+                Clear Filters
               </button>
             </div>
           {:else}
@@ -1930,11 +1977,20 @@
                             bind:this={splitSearchInput}
                             type="text"
                             bind:value={splitSearchQuery}
+                            oninput={() => (splitSearchIdx = 0)}
                             onkeydown={(e) => {
                               if (e.key === 'Escape') {
                                 terminalStore.closeSplit();
+                              } else if (e.key === 'ArrowDown' && splitPickerHosts.length > 0) {
+                                e.preventDefault();
+                                splitSearchIdx = (splitSearchIdx + 1) % splitPickerHosts.length;
+                              } else if (e.key === 'ArrowUp' && splitPickerHosts.length > 0) {
+                                e.preventDefault();
+                                splitSearchIdx = (splitSearchIdx - 1 + splitPickerHosts.length) % splitPickerHosts.length;
                               } else if (e.key === 'Enter' && splitPickerHosts.length > 0) {
-                                handleConnectSplitHost(splitPickerHosts[0]);
+                                e.preventDefault();
+                                const target = splitPickerHosts[splitSearchIdx] || splitPickerHosts[0];
+                                handleConnectSplitHost(target);
                               }
                             }}
                             placeholder="Search host to open in split pane..."
@@ -1972,11 +2028,11 @@
                             No matching hosts found.
                           </div>
                         {:else}
-                          {#each splitPickerHosts as h (h.id)}
+                          {#each splitPickerHosts as h, i (h.id)}
                             <button
                               type="button"
                               onclick={() => handleConnectSplitHost(h)}
-                              class="flex w-full items-center justify-between gap-3 rounded-lg border border-transparent bg-[#121217] px-3 py-2 text-left hover:border-emerald-500/30 hover:bg-[#171720] transition cursor-pointer"
+                              class="flex w-full items-center justify-between gap-3 rounded-lg border px-3 py-2 text-left transition cursor-pointer {i === splitSearchIdx ? 'border-emerald-500/45 bg-[#191925]' : 'border-transparent bg-[#121217] hover:border-emerald-500/30 hover:bg-[#171720]'}"
                             >
                               <div class="flex items-center gap-2.5 min-w-0">
                                 <Terminal class="h-3.5 w-3.5 text-emerald-400 shrink-0" />
@@ -2037,14 +2093,14 @@
         <SnippetsView
           activeVaultId={activeVault?.id}
           onRunSnippet={(script) => {
-            if (terminalStore.tabCount === 0) {
-              handleNewLocalTab();
-            } else {
+            if (terminalStore.tabCount > 0) {
               activeNav = 'terminal';
+              setTimeout(() => {
+                window.dispatchEvent(new CustomEvent('opentermius:run-snippet', { detail: { script } }));
+              }, 120);
+            } else {
+              pendingSnippetScript = script;
             }
-            setTimeout(() => {
-              window.dispatchEvent(new CustomEvent('opentermius:run-snippet', { detail: { script } }));
-            }, 120);
           }}
         />
       {:else if activeNav === 'logs'}
@@ -2441,14 +2497,21 @@
             bind:this={quickConnectInput}
             type="text"
             bind:value={quickConnectQuery}
+            oninput={() => (quickConnectIdx = 0)}
             autocapitalize="none"
             autocorrect="off"
             spellcheck={false}
             placeholder="Choose a remote host to connect..."
             onkeydown={(e) => {
-              if (e.key === 'Enter' && quickConnectHosts.length > 0) {
+              if (e.key === 'ArrowDown' && quickConnectHosts.length > 0) {
                 e.preventDefault();
-                const target = quickConnectHosts[0];
+                quickConnectIdx = (quickConnectIdx + 1) % quickConnectHosts.length;
+              } else if (e.key === 'ArrowUp' && quickConnectHosts.length > 0) {
+                e.preventDefault();
+                quickConnectIdx = (quickConnectIdx - 1 + quickConnectHosts.length) % quickConnectHosts.length;
+              } else if (e.key === 'Enter' && quickConnectHosts.length > 0) {
+                e.preventDefault();
+                const target = quickConnectHosts[quickConnectIdx] || quickConnectHosts[0];
                 isQuickConnectOpen = false;
                 handleConnect(target);
               }
@@ -2499,14 +2562,14 @@
               {hosts.length === 0 ? 'No remote hosts saved yet.' : 'No matching remote hosts.'}
             </div>
           {:else}
-            {#each quickConnectHosts as host (host.id)}
+            {#each quickConnectHosts as host, i (host.id)}
               <button
                 type="button"
                 onclick={() => {
                   isQuickConnectOpen = false;
                   handleConnect(host);
                 }}
-                class="flex w-full items-center justify-between gap-3 rounded-xl px-3 py-2.5 text-left hover:bg-[#1c1c2a] active:bg-[#222234] transition cursor-pointer group"
+                class="flex w-full items-center justify-between gap-3 rounded-xl px-3 py-2.5 text-left transition cursor-pointer group {i === quickConnectIdx ? 'bg-[#1c1c2a] ring-1 ring-emerald-500/40' : 'hover:bg-[#1c1c2a] active:bg-[#222234]'}"
               >
                 <div class="flex items-center gap-3 min-w-0">
                   <div class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
@@ -2632,4 +2695,68 @@
     isMac={platform.isMac}
     onClose={() => (isShortcutsOpen = false)}
   />
+
+  {#if pendingSnippetScript !== null}
+    <div
+      class="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-xs p-4"
+      onclick={(e) => { if (e.target === e.currentTarget) pendingSnippetScript = null; }}
+      role="presentation"
+    >
+      <div class="w-full max-w-md rounded-2xl border border-[#28283a] bg-[#13131c] p-5 shadow-2xl space-y-4 text-xs">
+        <div class="flex items-center justify-between border-b border-white/[0.06] pb-3">
+          <div>
+            <h3 class="text-sm font-semibold text-white">Run Snippet On...</h3>
+            <p class="text-[11px] text-neutral-400 mt-0.5">Choose a target session to execute this command.</p>
+          </div>
+          <button type="button" onclick={() => (pendingSnippetScript = null)} class="text-neutral-400 hover:text-white">
+            <X class="h-4 w-4" />
+          </button>
+        </div>
+
+        <div class="max-h-60 overflow-y-auto space-y-1.5">
+          {#if !platform.isAndroid}
+            <button
+              type="button"
+              onclick={() => {
+                const script = pendingSnippetScript!;
+                pendingSnippetScript = null;
+                handleNewLocalTab();
+                setTimeout(() => {
+                  window.dispatchEvent(new CustomEvent('opentermius:run-snippet', { detail: { script } }));
+                }, 400);
+              }}
+              class="flex w-full items-center gap-2.5 rounded-xl border border-white/[0.07] bg-[#171722] px-3 py-2.5 text-left hover:border-emerald-500/40 transition cursor-pointer"
+            >
+              <Terminal class="h-4 w-4 text-cyan-400 shrink-0" />
+              <div>
+                <p class="font-semibold text-white">Local Shell</p>
+                <p class="text-[11px] text-neutral-400">Open a new local terminal and run</p>
+              </div>
+            </button>
+          {/if}
+
+          {#each hosts as h (h.id)}
+            <button
+              type="button"
+              onclick={() => {
+                const script = pendingSnippetScript!;
+                pendingSnippetScript = null;
+                handleConnect(h);
+                setTimeout(() => {
+                  window.dispatchEvent(new CustomEvent('opentermius:run-snippet', { detail: { script } }));
+                }, 900);
+              }}
+              class="flex w-full items-center gap-2.5 rounded-xl border border-white/[0.07] bg-[#171722] px-3 py-2.5 text-left hover:border-emerald-500/40 transition cursor-pointer"
+            >
+              <Server class="h-4 w-4 text-emerald-400 shrink-0" />
+              <div class="min-w-0">
+                <p class="font-semibold text-white truncate">{h.label}</p>
+                <p class="text-[11px] font-mono text-neutral-400 truncate">{h.username}@{h.address}:{h.port}</p>
+              </div>
+            </button>
+          {/each}
+        </div>
+      </div>
+    </div>
+  {/if}
 </div>

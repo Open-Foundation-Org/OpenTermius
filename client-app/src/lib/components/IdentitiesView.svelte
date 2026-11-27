@@ -381,8 +381,13 @@
 </div>
 
 <!-- Add Identity Modal -->
+<svelte:window onkeydown={(e) => { if (e.key === 'Escape' && isAddOpen) isAddOpen = false; }} />
 {#if isAddOpen}
-  <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4 overflow-y-auto">
+  <div
+    class="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4 overflow-y-auto"
+    onclick={(e) => { if (e.target === e.currentTarget) isAddOpen = false; }}
+    role="presentation"
+  >
     <div class="w-full max-w-lg rounded-2xl border border-[#28283a] bg-[#14141e] p-6 shadow-2xl space-y-4 animate-in fade-in zoom-in-95 duration-150 my-auto">
       <div class="flex items-start justify-between">
         <div class="flex items-center gap-3">

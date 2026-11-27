@@ -179,6 +179,7 @@ func (r *Router) registerRoutes() {
 	// Protected Vault Members
 	r.mux.Handle("GET /api/v1/vaults/{id}/members", r.authMiddleware(http.HandlerFunc(r.vaultHandler.ListMembers)))
 	r.mux.Handle("POST /api/v1/vaults/{id}/members", r.authMiddleware(http.HandlerFunc(r.vaultHandler.InviteMember)))
+	r.mux.Handle("DELETE /api/v1/vaults/{id}/members/{userId}", r.authMiddleware(http.HandlerFunc(r.vaultHandler.RemoveMember)))
 
 	// Protected Presence & Remote Collaboration Relay (Zero-SSH Blind Relay)
 	r.mux.Handle("POST /api/v1/presence/heartbeat", r.authMiddleware(http.HandlerFunc(r.collabHandler.Heartbeat)))

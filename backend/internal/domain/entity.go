@@ -45,6 +45,8 @@ type VaultMember struct {
 	ID                uuid.UUID `json:"id"`
 	VaultID           uuid.UUID `json:"vault_id"`
 	UserID            uuid.UUID `json:"user_id"`
+	Name              string    `json:"name,omitempty"`
+	Email             string    `json:"email,omitempty"`
 	Role              VaultRole `json:"role"`
 	EncryptedVaultKey string    `json:"encrypted_vault_key"`
 	CreatedAt         time.Time `json:"created_at"`
