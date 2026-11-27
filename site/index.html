@@ -3,2042 +3,428 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>OpenTermius — Native Rust SSH, E2EE Team Vaults &amp; Blind Relay Gateway</title>
-  <meta name="description" content="Open-source, self-hostable SSH and SFTP client for macOS, Windows, and Android. Zero-knowledge AES-256-GCM vaults, Live Request Remote over a blind WebSocket binary relay, 1-click Rejoin, and Gateway Web Admin Console." />
+  <title>OpenTermius — Open-Source SSH &amp; SFTP Client with Team Vaults</title>
+  <meta name="description" content="Open-source, self-hostable SSH and SFTP client for macOS, Windows, and Android. Encrypted Team Vaults, live terminal sharing, SSH tunnels, and Gateway Admin Console." />
+  <link rel="canonical" href="https://open-foundation-org.github.io/OpenTermius/" />
   <meta property="og:title" content="OpenTermius v0.7.0" />
-  <meta property="og:description" content="Self-hosted SSH &amp; SFTP platform with E2EE Team Vaults, Live Request Remote &amp; Rejoin, and Gateway Web Admin Console." />
-  <meta property="og:image" content="icon-256.png" />
+  <meta property="og:description" content="Self-hosted SSH and SFTP client with AES-256-GCM Team Vaults, live terminal sharing, and native Rust engine." />
+  <meta property="og:image" content="https://open-foundation-org.github.io/OpenTermius/icon-256.png" />
   <link rel="icon" type="image/svg+xml" href="icon.svg" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
-  <style>
-    :root {
-      --bg: #050507;
-      --surface: #0a0b10;
-      --surface-elevated: #0f1118;
-      --shell: rgba(255, 255, 255, 0.025);
-      --border: rgba(255, 255, 255, 0.08);
-      --border-hi: rgba(255, 255, 255, 0.16);
-      --text: #f4f4f6;
-      --muted: #8e95a5;
-      --dim: #586074;
-      --emerald: #10b981;
-      --emerald-hi: #34d399;
-      --cyan: #06b6d4;
-      --indigo: #6366f1;
-      --amber: #f59e0b;
-      --rose: #f43f5e;
-      --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
-      --ease-spring: cubic-bezier(0.32, 0.72, 0, 1);
-    }
-
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    html { scroll-behavior: smooth; background: var(--bg); color: var(--text); }
-    body {
-      font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
-      background-color: var(--bg);
-      color: var(--text);
-      line-height: 1.6;
-      overflow-x: hidden;
-      -webkit-font-smoothing: antialiased;
-    }
-
-    code, pre, .mono {
-      font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
-    }
-
-    a { color: inherit; text-decoration: none; }
-
-    .ambient-glow {
-      position: fixed;
-      inset: 0;
-      pointer-events: none;
-      z-index: 0;
-      background:
-        radial-gradient(circle at 18% 12%, rgba(16, 185, 129, 0.09), transparent 42%),
-        radial-gradient(circle at 82% 22%, rgba(6, 182, 212, 0.07), transparent 40%),
-        radial-gradient(circle at 50% 85%, rgba(99, 102, 241, 0.05), transparent 45%);
-    }
-
-    .wrap {
-      position: relative;
-      z-index: 2;
-      max-width: 1200px;
-      margin: 0 auto;
-      padding: 0 24px;
-    }
-
-    /* Floating Island Navbar */
-    .nav-holder {
-      position: sticky;
-      top: 18px;
-      z-index: 40;
-      display: flex;
-      justify-content: center;
-      padding: 0 16px;
-      pointer-events: none;
-    }
-    .nav-island {
-      pointer-events: auto;
-      display: flex;
-      align-items: center;
-      gap: 28px;
-      padding: 8px 10px 8px 18px;
-      border-radius: 999px;
-      background: rgba(10, 11, 16, 0.8);
-      backdrop-filter: blur(20px);
-      -webkit-backdrop-filter: blur(20px);
-      border: 1px solid var(--border);
-      box-shadow: 0 20px 50px rgba(0, 0, 0, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.1);
-    }
-    .brand {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      font-weight: 700;
-      font-size: 14px;
-      letter-spacing: -0.02em;
-    }
-    .brand img { width: 24px; height: 24px; border-radius: 6px; }
-    .brand-tag {
-      font-size: 11px;
-      font-weight: 600;
-      color: var(--emerald-hi);
-      background: rgba(16, 185, 129, 0.12);
-      border: 1px solid rgba(16, 185, 129, 0.28);
-      padding: 2px 8px;
-      border-radius: 999px;
-    }
-    .nav-links {
-      display: flex;
-      align-items: center;
-      gap: 20px;
-      font-size: 13px;
-      font-weight: 500;
-      color: var(--muted);
-    }
-    .nav-links a { transition: color 0.25s var(--ease-out); }
-    .nav-links a:hover { color: var(--text); }
-    .nav-cta {
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-      padding: 7px 14px;
-      border-radius: 999px;
-      font-size: 12px;
-      font-weight: 600;
-      background: rgba(255, 255, 255, 0.07);
-      border: 1px solid var(--border-hi);
-      color: var(--text);
-      transition: transform 0.3s var(--ease-spring), background 0.3s var(--ease-out);
-    }
-    .nav-cta:hover {
-      background: rgba(255, 255, 255, 0.12);
-      transform: translateY(-1px);
-    }
-
-    /* Double-Bezel Hardware Architecture */
-    .bezel-shell {
-      padding: 6px;
-      border-radius: 28px;
-      background: var(--shell);
-      border: 1px solid var(--border);
-      transition: border-color 0.4s var(--ease-out), transform 0.5s var(--ease-spring);
-    }
-    .bezel-shell:hover { border-color: rgba(255, 255, 255, 0.14); }
-    .bezel-core {
-      height: 100%;
-      border-radius: 22px;
-      background: var(--surface);
-      border: 1px solid rgba(255, 255, 255, 0.05);
-      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.1);
-      padding: 28px;
-      position: relative;
-      overflow: hidden;
-    }
-
-    /* Hero */
-    .hero {
-      padding: 88px 0 56px;
-      text-align: center;
-    }
-    .eyebrow {
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-      padding: 5px 14px;
-      border-radius: 999px;
-      background: rgba(16, 185, 129, 0.08);
-      border: 1px solid rgba(16, 185, 129, 0.25);
-      color: var(--emerald-hi);
-      font-size: 11px;
-      font-weight: 600;
-      text-transform: uppercase;
-      letter-spacing: 0.14em;
-      margin-bottom: 22px;
-    }
-    .pulse-dot {
-      width: 7px;
-      height: 7px;
-      border-radius: 50%;
-      background: var(--emerald);
-      box-shadow: 0 0 12px var(--emerald);
-    }
-    h1 {
-      font-size: clamp(36px, 5.8vw, 66px);
-      font-weight: 800;
-      line-height: 1.05;
-      letter-spacing: -0.035em;
-      max-width: 920px;
-      margin: 0 auto 20px;
-    }
-    .accent-grad {
-      background: linear-gradient(135deg, #ffffff 15%, #34d399 58%, #22d3ee 100%);
-      -webkit-background-clip: text;
-      background-clip: text;
-      color: transparent;
-    }
-    .hero-sub {
-      max-width: 680px;
-      margin: 0 auto 34px;
-      font-size: clamp(15.5px, 1.9vw, 18px);
-      color: var(--muted);
-      line-height: 1.65;
-    }
-
-    .cta-row {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      gap: 14px;
-      flex-wrap: wrap;
-    }
-    .btn-island {
-      display: inline-flex;
-      align-items: center;
-      gap: 12px;
-      padding: 8px 8px 8px 22px;
-      border-radius: 999px;
-      font-size: 14px;
-      font-weight: 600;
-      transition: transform 0.4s var(--ease-spring), box-shadow 0.4s var(--ease-out), background 0.3s var(--ease-out);
-      cursor: pointer;
-    }
-    .btn-island:active { transform: scale(0.98); }
-    .btn-primary {
-      background: var(--emerald);
-      color: #03120c;
-      box-shadow: 0 12px 34px rgba(16, 185, 129, 0.25);
-    }
-    .btn-primary:hover {
-      background: var(--emerald-hi);
-      box-shadow: 0 16px 44px rgba(16, 185, 129, 0.36);
-    }
-    .btn-icon-circle {
-      width: 32px;
-      height: 32px;
-      border-radius: 50%;
-      background: rgba(0, 0, 0, 0.16);
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      transition: transform 0.35s var(--ease-spring);
-    }
-    .btn-island:hover .btn-icon-circle {
-      transform: translate(2px, -1px) scale(1.06);
-    }
-    .btn-secondary {
-      background: var(--surface-elevated);
-      color: var(--text);
-      border: 1px solid var(--border-hi);
-      padding: 8px 8px 8px 20px;
-    }
-    .btn-secondary .btn-icon-circle { background: rgba(255, 255, 255, 0.08); }
-    .btn-secondary:hover {
-      border-color: rgba(255, 255, 255, 0.28);
-      background: #141722;
-    }
-
-    /* ============================================================
-       LIVE FEATURE REEL PLAYER (SIMULATED REAL APP RECORDINGS)
-       ============================================================ */
-    .reel-section { padding: 8px 0 96px; }
-    .reel-core { padding: 0; background: #07080c; }
-
-    /* Reel Selector Pills */
-    .reel-selector {
-      display: grid;
-      grid-template-columns: repeat(5, 1fr);
-      border-bottom: 1px solid var(--border);
-      background: #0b0d14;
-    }
-    .reel-btn {
-      appearance: none;
-      background: transparent;
-      border: 0;
-      border-right: 1px solid var(--border);
-      padding: 15px 16px;
-      text-align: left;
-      color: var(--muted);
-      cursor: pointer;
-      position: relative;
-      transition: background 0.25s var(--ease-out), color 0.25s var(--ease-out);
-    }
-    .reel-btn:last-child { border-right: 0; }
-    .reel-btn:hover { background: rgba(255, 255, 255, 0.025); color: var(--text); }
-    .reel-btn.active {
-      background: rgba(16, 185, 129, 0.06);
-      color: var(--text);
-    }
-    .reel-num {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      font-size: 10px;
-      color: var(--emerald-hi);
-      letter-spacing: 0.12em;
-      text-transform: uppercase;
-      margin-bottom: 4px;
-    }
-    .reel-name {
-      display: block;
-      font-size: 12.5px;
-      font-weight: 700;
-      letter-spacing: -0.01em;
-    }
-    .reel-bar {
-      position: absolute;
-      left: 0; bottom: 0;
-      height: 2px;
-      width: 0%;
-      background: linear-gradient(90deg, var(--emerald), var(--cyan));
-    }
-
-    /* Simulated App Viewport */
-    .sim-viewport {
-      position: relative;
-      min-height: 490px;
-      background: #0a0a0c;
-      overflow: hidden;
-      display: flex;
-      flex-direction: column;
-    }
-    .sim-reel {
-      display: none;
-      flex: 1;
-      flex-direction: column;
-      position: relative;
-      min-height: 490px;
-    }
-    .sim-reel.active { display: flex; }
-
-    /* Simulated Pointer Cursor */
-    .sim-cursor {
-      position: absolute;
-      width: 22px;
-      height: 22px;
-      pointer-events: none;
-      z-index: 30;
-      transition: transform 0.65s var(--ease-spring), opacity 0.25s ease;
-      filter: drop-shadow(0 6px 14px rgba(0, 0, 0, 0.75));
-    }
-    .sim-cursor svg { width: 22px; height: 22px; }
-    .sim-cursor.clicking::after {
-      content: "";
-      position: absolute;
-      top: -6px; left: -6px;
-      width: 28px; height: 28px;
-      border-radius: 50%;
-      border: 2px solid var(--emerald-hi);
-      animation: clickRipple 0.5s var(--ease-out) forwards;
-    }
-    @keyframes clickRipple {
-      from { transform: scale(0.4); opacity: 1; }
-      to { transform: scale(1.7); opacity: 0; }
-    }
-
-    /* Step Caption HUD at bottom of video */
-    .reel-hud {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      padding: 12px 20px;
-      background: #0c0e16;
-      border-top: 1px solid var(--border);
-      gap: 14px;
-      font-size: 12px;
-    }
-    .hud-left {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      min-width: 0;
-    }
-    .hud-badge {
-      padding: 2px 8px;
-      border-radius: 6px;
-      background: rgba(16, 185, 129, 0.14);
-      border: 1px solid rgba(16, 185, 129, 0.35);
-      color: var(--emerald-hi);
-      font-size: 11px;
-      font-weight: 600;
-      white-space: nowrap;
-    }
-    .hud-step-text {
-      color: #d1d5db;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-    }
-    .hud-controls {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      shrink: 0;
-    }
-
-    /* Actual OpenTermius App Chrome Inside Reels */
-    .ot-app {
-      display: grid;
-      grid-template-columns: 205px 1fr;
-      flex: 1;
-      background: #0a0a0c;
-    }
-    .ot-sidebar {
-      background: #0e0e13;
-      border-right: 1px solid #1c1c25;
-      padding: 14px 10px;
-      display: flex;
-      flex-direction: column;
-      justify-content: space-between;
-      font-size: 12px;
-    }
-    .ot-vault-btn {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      padding: 8px 10px;
-      border-radius: 10px;
-      background: #14141d;
-      border: 1px solid #252535;
-      color: #fff;
-      font-weight: 600;
-      margin-bottom: 12px;
-    }
-    .ot-nav-item {
-      display: flex;
-      align-items: center;
-      gap: 9px;
-      padding: 8px 10px;
-      border-radius: 9px;
-      color: #94a3b8;
-      margin-bottom: 3px;
-      font-weight: 500;
-    }
-    .ot-nav-item.active {
-      background: rgba(16, 185, 129, 0.12);
-      color: #34d399;
-      border: 1px solid rgba(16, 185, 129, 0.25);
-    }
-    .ot-main {
-      display: flex;
-      flex-direction: column;
-      min-width: 0;
-      position: relative;
-    }
-    .ot-header {
-      height: 44px;
-      border-bottom: 1px solid #1c1c25;
-      background: #111116;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      padding: 0 14px;
-      gap: 10px;
-    }
-    .ot-tabs {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-    }
-    .ot-tab {
-      display: inline-flex;
-      align-items: center;
-      gap: 7px;
-      padding: 5px 11px;
-      border-radius: 8px;
-      font-size: 11.5px;
-      background: #14141a;
-      border: 1px solid #20202a;
-      color: #94a3b8;
-    }
-    .ot-tab.active {
-      background: rgba(16, 185, 129, 0.12);
-      border-color: rgba(16, 185, 129, 0.35);
-      color: #34d399;
-      font-weight: 600;
-    }
-    .ot-body {
-      flex: 1;
-      padding: 18px;
-      position: relative;
-      display: flex;
-      flex-direction: column;
-      gap: 14px;
-    }
-
-    /* Real App Popup / Toast Inside Reels */
-    .ot-toast {
-      position: absolute;
-      bottom: 16px;
-      right: 16px;
-      z-index: 25;
-      padding: 10px 14px;
-      border-radius: 12px;
-      background: rgba(16, 20, 30, 0.95);
-      border: 1px solid rgba(16, 185, 129, 0.45);
-      color: #ecfdf5;
-      font-size: 12px;
-      font-weight: 600;
-      box-shadow: 0 18px 40px rgba(0, 0, 0, 0.65);
-      transform: translateY(16px);
-      opacity: 0;
-      transition: transform 0.35s var(--ease-spring), opacity 0.3s ease;
-    }
-    .ot-toast.show {
-      transform: translateY(0);
-      opacity: 1;
-    }
-
-    .ot-req-modal {
-      position: absolute;
-      top: 54px;
-      right: 16px;
-      width: 310px;
-      z-index: 26;
-      border-radius: 16px;
-      border: 1px solid rgba(16, 185, 129, 0.45);
-      background: rgba(20, 20, 31, 0.96);
-      padding: 14px;
-      box-shadow: 0 24px 60px rgba(0, 0, 0, 0.75);
-      transform: translateY(-12px);
-      opacity: 0;
-      pointer-events: none;
-      transition: transform 0.35s var(--ease-spring), opacity 0.3s ease;
-    }
-    .ot-req-modal.show {
-      transform: translateY(0);
-      opacity: 1;
-    }
-
-    /* Avatar circles matching App.svelte */
-    .avatar-stack { display: inline-flex; align-items: center; }
-    .avatar {
-      width: 24px;
-      height: 24px;
-      border-radius: 50%;
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 9.5px;
-      font-weight: 700;
-      color: #fff;
-      border: 2px solid #11121c;
-      margin-left: -6px;
-    }
-    .avatar:first-child { margin-left: 0; }
-    .av-emerald { background: #059669; }
-    .av-indigo { background: #4f46e5; }
-    .av-cyan { background: #0891b2; }
-    .av-rose { background: #e11d48; }
-
-    /* Team Live SSH Card matching App.svelte */
-    .team-live-box {
-      border-radius: 16px;
-      border: 1px solid rgba(99, 102, 241, 0.3);
-      background: rgba(30, 27, 75, 0.22);
-      padding: 12px;
-    }
-    .team-live-row {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 10px;
-      border-radius: 12px;
-      background: #11121c;
-      border: 1px solid #232538;
-      padding: 10px 12px;
-      margin-top: 8px;
-    }
-    .ot-btn {
-      padding: 6px 11px;
-      border-radius: 8px;
-      font-size: 11px;
-      font-weight: 600;
-      border: 1px solid transparent;
-      display: inline-flex;
-      align-items: center;
-      gap: 5px;
-      transition: transform 0.2s ease, background 0.2s ease;
-    }
-    .ot-btn-view {
-      background: #1d2033;
-      border-color: rgba(99, 102, 241, 0.35);
-      color: #a5b4fc;
-    }
-    .ot-btn-ctrl { background: #059669; color: #fff; }
-    .ot-btn-rejoin { background: #0891b2; color: #fff; }
-
-    /* Simulated Terminal View matching TerminalView.svelte */
-    .ot-term-pane {
-      flex: 1;
-      display: flex;
-      flex-direction: column;
-      border-radius: 12px;
-      border: 1px solid #1c1c28;
-      background: #08090d;
-      overflow: hidden;
-      position: relative;
-    }
-    .ot-term-bar {
-      height: 36px;
-      background: #0d0d12;
-      border-bottom: 1px solid #1a1a24;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      padding: 0 12px;
-      font-size: 11.5px;
-    }
-    .ot-term-screen {
-      flex: 1;
-      padding: 14px;
-      font-size: 12.5px;
-      line-height: 1.65;
-      color: #e2e8f0;
-      position: relative;
-    }
-    .ot-typing-pill {
-      position: absolute;
-      top: 10px;
-      right: 12px;
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      padding: 4px 10px;
-      border-radius: 999px;
-      border: 1px solid rgba(16, 185, 129, 0.4);
-      background: rgba(18, 19, 31, 0.92);
-      color: #6ee7b7;
-      font-size: 11px;
-      font-weight: 500;
-      opacity: 0;
-      transform: translateY(-6px);
-      transition: opacity 0.25s ease, transform 0.25s ease;
-    }
-    .ot-typing-pill.show {
-      opacity: 1;
-      transform: translateY(0);
-    }
-
-    /* Phone Simulator Frame for Reel 04 */
-    .phone-stage {
-      flex: 1;
-      display: grid;
-      grid-template-columns: 320px 1fr;
-      gap: 24px;
-      padding: 20px 28px;
-      align-items: center;
-    }
-    .phone-frame {
-      border-radius: 26px;
-      border: 2px solid #26283a;
-      background: #0a0a0d;
-      overflow: hidden;
-      box-shadow: 0 24px 60px rgba(0, 0, 0, 0.7);
-      position: relative;
-    }
-    .phone-notif {
-      position: absolute;
-      top: 8px; left: 8px; right: 8px;
-      z-index: 20;
-      background: rgba(18, 21, 32, 0.96);
-      border: 1px solid rgba(16, 185, 129, 0.45);
-      border-radius: 14px;
-      padding: 10px 12px;
-      font-size: 11px;
-      box-shadow: 0 14px 30px rgba(0,0,0,0.75);
-      transform: translateY(-120%);
-      transition: transform 0.4s var(--ease-spring);
-    }
-    .phone-notif.show { transform: translateY(0); }
-    .phone-app-header {
-      height: 44px;
-      background: #0e0e13;
-      border-bottom: 1px solid #1f1f2a;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      padding: 0 12px;
-      font-size: 12px;
-      transition: height 0.35s var(--ease-spring), opacity 0.25s ease;
-      overflow: hidden;
-    }
-    .phone-app-header.collapsed {
-      height: 0;
-      opacity: 0;
-      border-bottom: 0;
-    }
-    .termux-grid {
-      background: #0d0d13;
-      border-top: 1px solid #1f202c;
-      padding: 6px;
-      display: flex;
-      flex-direction: column;
-      gap: 4px;
-    }
-    .termux-row {
-      display: grid;
-      grid-template-columns: repeat(7, 1fr);
-      gap: 4px;
-    }
-    .t-key {
-      height: 26px;
-      border-radius: 5px;
-      background: #14141e;
-      border: 1px solid #222230;
-      color: #d4d4d8;
-      font-size: 10px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-weight: 600;
-    }
-    .t-key.active {
-      background: var(--emerald);
-      color: #03120c;
-      border-color: var(--emerald-hi);
-      font-weight: 800;
-    }
-
-    /* Section Headings */
-    section {
-      padding: 104px 0;
-      border-top: 1px solid var(--border);
-    }
-    .sec-head {
-      max-width: 680px;
-      margin-bottom: 56px;
-    }
-    .sec-eyebrow {
-      display: inline-block;
-      font-size: 11px;
-      font-weight: 600;
-      text-transform: uppercase;
-      letter-spacing: 0.16em;
-      color: var(--emerald-hi);
-      margin-bottom: 12px;
-    }
-    h2 {
-      font-size: clamp(28px, 4vw, 44px);
-      font-weight: 800;
-      letter-spacing: -0.03em;
-      line-height: 1.12;
-      margin-bottom: 14px;
-    }
-    .sec-desc { color: var(--muted); font-size: 16px; }
-
-    /* Asymmetrical Bento Grid */
-    .bento-grid {
-      display: grid;
-      grid-template-columns: repeat(12, 1fr);
-      gap: 20px;
-    }
-    .span-7 { grid-column: span 7; }
-    .span-5 { grid-column: span 5; }
-    .span-4 { grid-column: span 4; }
-    .span-6 { grid-column: span 6; }
-    .span-12 { grid-column: span 12; }
-
-    .bento-idx {
-      font-size: 11px;
-      color: var(--emerald-hi);
-      letter-spacing: 0.12em;
-      text-transform: uppercase;
-      margin-bottom: 14px;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-    }
-    .bento-core h3 {
-      font-size: 21px;
-      font-weight: 700;
-      letter-spacing: -0.02em;
-      margin-bottom: 10px;
-    }
-    .bento-core p {
-      color: var(--muted);
-      font-size: 14.5px;
-      line-height: 1.65;
-    }
-    .spec-list {
-      margin-top: 20px;
-      display: flex;
-      flex-wrap: wrap;
-      gap: 8px;
-      list-style: none;
-    }
-    .spec-chip {
-      font-size: 11.5px;
-      padding: 4px 10px;
-      border-radius: 999px;
-      background: rgba(255, 255, 255, 0.04);
-      border: 1px solid var(--border);
-      color: #cbd5e1;
-    }
-
-    /* Code / Installer Block */
-    .cmd-box {
-      background: #06070b;
-      border: 1px solid var(--border);
-      border-radius: 16px;
-      padding: 18px 20px;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 16px;
-      margin-top: 16px;
-      overflow-x: auto;
-    }
-    .cmd-box code {
-      font-size: 13px;
-      color: #e2e8f0;
-      white-space: nowrap;
-    }
-    .copy-btn {
-      appearance: none;
-      background: rgba(255, 255, 255, 0.06);
-      border: 1px solid var(--border-hi);
-      color: var(--text);
-      padding: 6px 12px;
-      border-radius: 8px;
-      font-size: 12px;
-      font-weight: 600;
-      cursor: pointer;
-      shrink: 0;
-      transition: background 0.2s var(--ease-out), border-color 0.2s var(--ease-out);
-    }
-    .copy-btn:hover {
-      background: rgba(16, 185, 129, 0.15);
-      border-color: var(--emerald);
-      color: var(--emerald-hi);
-    }
-
-    /* Comparison Matrix */
-    .matrix-wrap { overflow-x: auto; }
-    .matrix {
-      width: 100%;
-      border-collapse: collapse;
-      text-align: left;
-      font-size: 14px;
-    }
-    .matrix th, .matrix td {
-      padding: 16px 20px;
-      border-bottom: 1px solid var(--border);
-    }
-    .matrix th {
-      font-size: 12px;
-      text-transform: uppercase;
-      letter-spacing: 0.08em;
-      color: var(--muted);
-      background: rgba(255, 255, 255, 0.02);
-    }
-    .matrix tr:last-child td { border-bottom: 0; }
-    .tag-free {
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      color: var(--emerald-hi);
-      font-weight: 600;
-    }
-    .tag-paid { color: var(--dim); }
-
-    /* Scroll Entry Reveal */
-    .reveal {
-      opacity: 0;
-      transform: translateY(24px);
-      transition: opacity 0.7s var(--ease-spring), transform 0.7s var(--ease-spring);
-    }
-    .reveal.in-view {
-      opacity: 1;
-      transform: translateY(0);
-    }
-
-    footer {
-      border-top: 1px solid var(--border);
-      padding: 48px 0;
-      color: var(--muted);
-      font-size: 13px;
-    }
-    .foot-row {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      flex-wrap: wrap;
-      gap: 16px;
-    }
-
-    @media (max-width: 920px) {
-      .span-7, .span-5, .span-4, .span-6 { grid-column: span 12; }
-      .reel-selector { grid-template-columns: repeat(2, 1fr); }
-      .ot-app { grid-template-columns: 1fr; }
-      .ot-sidebar { display: none; }
-      .phone-stage { grid-template-columns: 1fr; }
-      .nav-links .hide-mobile { display: none; }
-      section { padding: 72px 0; }
-    }
-  </style>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
-  <div class="ambient-glow"></div>
-
-  <!-- Floating Glass Island Navbar -->
-  <div class="nav-holder">
-    <nav class="nav-island" aria-label="Primary Navigation">
+  <header class="site-header" id="site-header">
+    <div class="wrap nav-bar">
       <a class="brand" href="#">
-        <img src="icon.svg" alt="OpenTermius" />
+        <img src="icon.svg" alt="OpenTermius logo" />
         <span>OpenTermius</span>
-        <span class="brand-tag mono">v0.7.0</span>
+        <span class="brand-version mono">v0.7.0</span>
       </a>
-      <div class="nav-links">
-        <a class="hide-mobile" href="#reels">Live Reels</a>
-        <a class="hide-mobile" href="#exclusive">Architecture</a>
-        <a class="hide-mobile" href="#self-host">1-Command Gateway</a>
+      <nav class="nav-links" aria-label="Primary navigation">
+        <a class="hide-mobile" href="#features">Features</a>
+        <a class="hide-mobile" href="#self-host">Self-host</a>
         <a class="hide-mobile" href="#compare">Compare</a>
         <a href="#download">Download</a>
-      </div>
-      <a class="nav-cta" href="https://github.com/Open-Foundation-Org/OpenTermius" target="_blank" rel="noopener">
+      </nav>
+      <a class="nav-gh" href="https://github.com/Open-Foundation-Org/OpenTermius" target="_blank" rel="noopener">
         <span>GitHub</span>
-        <span class="mono">↗</span>
-      </a>
-    </nav>
-  </div>
-
-  <!-- Hero -->
-  <header class="hero wrap">
-    <div class="eyebrow mono">
-      <span class="pulse-dot"></span>
-      <span>Zero-Paywall SSH &amp; Self-Hosted Team Gateway</span>
-    </div>
-    <h1>
-      Native Rust SSH with<br />
-      <span class="accent-grad">Live Team Relay &amp; E2EE Vaults.</span>
-    </h1>
-    <p class="hero-sub">
-      Native SSH and SFTP for macOS, Windows, and Android with encrypted Team Vaults, live terminal sharing, and your own Gateway console.
-    </p>
-    <div class="cta-row">
-      <a class="btn-island btn-primary" href="https://github.com/Open-Foundation-Org/OpenTermius/releases/latest">
-        <span>Download v0.7.0 (macOS, Windows &amp; Android)</span>
-        <span class="btn-icon-circle mono">↓</span>
-      </a>
-      <a class="btn-island btn-secondary" href="#self-host">
-        <span>Deploy Gateway in 1 Command</span>
-        <span class="btn-icon-circle mono">&gt;_</span>
       </a>
     </div>
   </header>
 
-  <!-- ============================================================
-       5-REEL INTERACTIVE PRODUCT SIMULATION PLAYER
-       ============================================================ -->
-  <div id="reels" class="reel-section wrap reveal">
-    <div class="bezel-shell">
-      <div class="bezel-core reel-core">
-        <!-- 5 Reel Selector Tabs -->
-        <div class="reel-selector" role="tablist">
-          <button type="button" class="reel-btn active" data-reel="0">
-            <span class="reel-num mono"><span>Reel 01</span><span>00:08</span></span>
-            <span class="reel-name">Request Remote, Typing &amp; Rejoin</span>
-            <div class="reel-bar" data-bar="0"></div>
-          </button>
-          <button type="button" class="reel-btn" data-reel="1">
-            <span class="reel-num mono"><span>Reel 02</span><span>00:08</span></span>
-            <span class="reel-name">Gateway Web Admin Console</span>
-            <div class="reel-bar" data-bar="1"></div>
-          </button>
-          <button type="button" class="reel-btn" data-reel="2">
-            <span class="reel-num mono"><span>Reel 03</span><span>00:08</span></span>
-            <span class="reel-name">Online / Offline Sync &amp; E2EE</span>
-            <div class="reel-bar" data-bar="2"></div>
-          </button>
-          <button type="button" class="reel-btn" data-reel="3">
-            <span class="reel-num mono"><span>Reel 04</span><span>00:08</span></span>
-            <span class="reel-name">Android Keep-Alive &amp; Focus Mode</span>
-            <div class="reel-bar" data-bar="3"></div>
-          </button>
-          <button type="button" class="reel-btn" data-reel="4">
-            <span class="reel-num mono"><span>Reel 05</span><span>00:08</span></span>
-            <span class="reel-name">Stop-Share Auto-Close &amp; SFTP</span>
-            <div class="reel-bar" data-bar="4"></div>
-          </button>
-        </div>
-
-        <!-- Simulated Live App Viewport -->
-        <div class="sim-viewport">
-          <!-- Animated Pointer Cursor -->
-          <div class="sim-cursor" id="sim-cursor" style="transform: translate(520px, 220px);">
-            <svg viewBox="0 0 24 24" fill="none">
-              <path d="M4 3L19 10.5L11.5 13L9 20.5L4 3Z" fill="#10b981" stroke="#ffffff" stroke-width="1.8" stroke-linejoin="round"/>
-            </svg>
-          </div>
-
-          <!-- ====================================================
-               REEL 01: Request Remote, Live Typing & 1-Click Rejoin
-               ==================================================== -->
-          <div class="sim-reel active" data-reel-pane="0">
-            <div class="ot-app">
-              <aside class="ot-sidebar">
-                <div>
-                  <div class="ot-vault-btn">
-                    <div>
-                      <div style="font-size:10px; color:#34d399; text-transform:uppercase">Team Vault</div>
-                      <div>Infra Production</div>
-                    </div>
-                    <span class="mono" style="color:#64748b">▾</span>
-                  </div>
-                  <div class="ot-nav-item active" id="r1-nav-hosts"><span>▣</span><span>Hosts</span></div>
-                  <div class="ot-nav-item" id="r1-nav-term"><span>&gt;_</span><span>Terminal (1)</span></div>
-                  <div class="ot-nav-item"><span>⇄</span><span>SFTP</span></div>
-                  <div class="ot-nav-item"><span>🔑</span><span>Keychain</span></div>
-                </div>
-                <div class="mono" style="font-size:11px; color:#34d399; padding:8px 10px; background:rgba(16,185,129,0.08); border-radius:8px; border:1px solid rgba(16,185,129,0.25)">
-                  ● Online · Gateway
-                </div>
-              </aside>
-
-              <div class="ot-main">
-                <div class="ot-header">
-                  <div class="ot-tabs">
-                    <span class="ot-tab active" id="r1-tab-hosts">Hosts Dashboard</span>
-                    <span class="ot-tab" id="r1-tab-remote" style="display:none">
-                      <span class="pulse-dot" style="width:6px;height:6px"></span>
-                      <span>prod-k8s-worker-01 (control)</span>
-                    </span>
-                  </div>
-                  <span class="mono" style="font-size:11px; color:var(--muted)">Device: Dika-MacBook</span>
-                </div>
-
-                <!-- Host Approval Modal (Appears in Step 2) -->
-                <div class="ot-req-modal" id="r1-approve-modal">
-                  <div class="mono" style="font-size:10px; font-weight:700; color:#34d399; text-transform:uppercase; letter-spacing:0.08em">
-                    Host View · Remote Access Request
-                  </div>
-                  <div style="font-size:13px; font-weight:700; margin-top:4px">
-                    Dika <span style="font-weight:400; font-size:11px; color:#94a3b8">(dika@opentermius.local)</span>
-                  </div>
-                  <div style="font-size:11.5px; color:#cbd5e1; margin-top:3px">
-                    Wants <span style="color:#22d3ee; font-weight:600">Control (Read-Write)</span> on <span class="mono">prod-k8s-worker-01</span>
-                  </div>
-                  <div style="display:grid; grid-template-columns:repeat(3,1fr); gap:6px; margin-top:10px">
-                    <span class="ot-btn" style="background:#222232; color:#cbd5e1; justify-content:center">Decline</span>
-                    <span class="ot-btn" style="background:#4f46e5; color:#fff; justify-content:center">View Only</span>
-                    <span class="ot-btn ot-btn-ctrl" id="r1-allow-btn" style="justify-content:center">Allow Control</span>
-                  </div>
-                </div>
-
-                <div class="ot-body">
-                  <!-- Subview A: Team Live SSH Panel -->
-                  <div id="r1-hosts-view">
-                    <div class="team-live-box">
-                      <div style="display:flex; justify-content:space-between; align-items:center">
-                        <span class="mono" style="font-size:11px; font-weight:700; color:#a5b4fc; text-transform:uppercase; letter-spacing:0.08em">
-                          Team Live SSH (1)
-                        </span>
-                        <span class="mono" style="font-size:10px; color:#94a3b8">Encrypted Binary Relay</span>
-                      </div>
-                      <div class="team-live-row">
-                        <div style="display:flex; align-items:center; gap:10px">
-                          <div class="avatar-stack" id="r1-avatars">
-                            <span class="avatar av-emerald" title="Wisnu (Host)">WW</span>
-                          </div>
-                          <div>
-                            <div style="font-size:13px; font-weight:700; color:#fff">prod-k8s-worker-01</div>
-                            <div class="mono" id="r1-peer-meta" style="font-size:11px; color:#94a3b8">Wisnu · macOS Desktop</div>
-                          </div>
-                        </div>
-                        <div style="display:flex; gap:6px" id="r1-action-Area">
-                          <span class="ot-btn ot-btn-view" id="r1-btn-view">Request View</span>
-                          <span class="ot-btn ot-btn-ctrl" id="r1-btn-ctrl">Request Control</span>
-                          <span class="ot-btn ot-btn-rejoin" id="r1-btn-rejoin" style="display:none">Rejoin (Control)</span>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-
-                  <!-- Subview B: Active Shared Terminal with Live Typing Tooltip -->
-                  <div class="ot-term-pane" id="r1-term-view" style="display:none">
-                    <div class="ot-term-bar">
-                      <div style="display:flex; align-items:center; gap:8px">
-                        <span class="pulse-dot"></span>
-                        <span style="font-weight:700; color:#fff">prod-k8s-worker-01 (control)</span>
-                      </div>
-                      <div style="display:flex; align-items:center; gap:8px">
-                        <div class="avatar-stack">
-                          <span class="avatar av-emerald" title="Wisnu (Host)">WW</span>
-                          <span class="avatar av-indigo" title="Dika (Control)">DK</span>
-                        </div>
-                        <span class="mono" style="font-size:10px; background:rgba(99,102,241,0.2); border:1px solid rgba(99,102,241,0.4); color:#a5b4fc; padding:2px 8px; border-radius:999px">
-                          Remote Control
-                        </span>
-                      </div>
-                    </div>
-                    <div class="ot-term-screen mono">
-                      <div class="ot-typing-pill" id="r1-typing-pill">
-                        <span class="avatar av-emerald" style="width:15px;height:15px;font-size:8px;border:0;margin:0">WW</span>
-                        <span id="r1-typing-who">Wisnu is typing...</span>
-                      </div>
-                      <div style="color:#38bdf8">Joining remote session (Read-Write)...</div>
-                      <div style="margin-top:6px">
-                        <span style="color:#34d399">ubuntu@prod-k8s-worker-01:~$</span>
-                        <span id="r1-typed-cmd"></span><span style="display:inline-block;width:7px;height:14px;background:#10b981;vertical-align:middle"></span>
-                      </div>
-                      <div id="r1-cmd-output" style="color:#cbd5e1; margin-top:6px; display:none">
-                        CONTAINER ID &nbsp;&nbsp;IMAGE &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;STATUS &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;PORTS<br />
-                        91a4c8e2d1f0 &nbsp;&nbsp;opentermius/api:0.4 &nbsp;&nbsp;Up 6 days &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;0.0.0.0:8081-&gt;8081/tcp<br />
-                        4b2e19f0a3c1 &nbsp;&nbsp;postgres:16-alpine &nbsp;&nbsp;&nbsp;Up 6 days &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;5432/tcp
-                      </div>
-                    </div>
-                  </div>
-
-                  <div class="ot-toast" id="r1-toast">Requested control access...</div>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <!-- ====================================================
-               REEL 02: Gateway Web Admin Console (:5174)
-               ==================================================== -->
-          <div class="sim-reel" data-reel-pane="1">
-            <div class="ot-app">
-              <aside class="ot-sidebar">
-                <div>
-                  <div style="font-weight:800; font-size:13px; color:#fff; padding:6px 10px 14px; display:flex; align-items:center; gap:8px">
-                    <span class="pulse-dot"></span>
-                    <span>Gateway Admin</span>
-                  </div>
-                  <div class="ot-nav-item active" id="r2-nav-overview"><span>◉</span><span>Overview &amp; Live SSH</span></div>
-                  <div class="ot-nav-item" id="r2-nav-teams"><span>👥</span><span>Team Vaults</span></div>
-                  <div class="ot-nav-item"><span>👤</span><span>Users (8)</span></div>
-                  <div class="ot-nav-item"><span>📜</span><span>Session Audit Logs</span></div>
-                </div>
-                <div class="mono" style="font-size:10.5px; color:#94a3b8; padding:8px 10px">
-                  API: :8081/api/v1
-                </div>
-              </aside>
-
-              <div class="ot-main">
-                <div class="ot-header">
-                  <span style="font-size:12.5px; font-weight:700; color:#fff">Gateway Cluster Monitor &amp; Team Presence</span>
-                  <span class="status-pill mono">● 8s Heartbeat Active</span>
-                </div>
-
-                <div class="ot-body">
-                  <div style="display:grid; grid-template-columns:repeat(3,1fr); gap:10px">
-                    <div style="background:#11131d; border:1px solid var(--border); border-radius:12px; padding:12px">
-                      <div style="font-size:11px; color:var(--muted)">Online Devices</div>
-                      <div class="mono" id="r2-stat-dev" style="font-size:20px; font-weight:800; color:#34d399; margin-top:2px">2</div>
-                    </div>
-                    <div style="background:#11131d; border:1px solid var(--border); border-radius:12px; padding:12px">
-                      <div style="font-size:11px; color:var(--muted)">Active SSH Sessions</div>
-                      <div class="mono" id="r2-stat-ssh" style="font-size:20px; font-weight:800; color:#22d3ee; margin-top:2px">2</div>
-                    </div>
-                    <div style="background:#11131d; border:1px solid var(--border); border-radius:12px; padding:12px">
-                      <div style="font-size:11px; color:var(--muted)">Team Vault Members</div>
-                      <div class="mono" id="r2-stat-mem" style="font-size:20px; font-weight:800; color:#fff; margin-top:2px">4</div>
-                    </div>
-                  </div>
-
-                  <!-- Live Presence Table -->
-                  <div style="background:#0f111a; border:1px solid var(--border); border-radius:14px; padding:14px; flex:1">
-                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px">
-                      <span style="font-size:12px; font-weight:700">Live Connected Devices &amp; Active SSH</span>
-                      <span class="ot-btn ot-btn-ctrl" id="r2-invite-btn">+ Invite Teammate</span>
-                    </div>
-                    <div class="mono" style="font-size:11.5px; display:flex; flex-direction:column; gap:8px">
-                      <div style="display:flex; justify-content:space-between; align-items:center; padding:9px 12px; background:#141724; border-radius:10px; border:1px solid var(--border)">
-                        <div>
-                          <span style="color:#34d399">●</span> <strong>Wisnu</strong> (macOS Desktop)
-                        </div>
-                        <div style="display:flex; align-items:center; gap:8px">
-                          <div class="avatar-stack">
-                            <span class="avatar av-emerald">WW</span>
-                            <span class="avatar av-indigo">DK</span>
-                          </div>
-                          <span style="background:rgba(16,185,129,0.14); color:#34d399; padding:2px 8px; border-radius:6px">ssh://prod-k8s-worker-01</span>
-                        </div>
-                      </div>
-
-                      <div style="display:flex; justify-content:space-between; align-items:center; padding:9px 12px; background:#141724; border-radius:10px; border:1px solid var(--border)">
-                        <div>
-                          <span style="color:#34d399">●</span> <strong>Dika</strong> (Android Device)
-                        </div>
-                        <span style="background:rgba(6,182,212,0.14); color:#22d3ee; padding:2px 8px; border-radius:6px">ssh://db-replica-01</span>
-                      </div>
-
-                      <div id="r2-new-peer" style="display:none; justify-content:space-between; align-items:center; padding:9px 12px; background:rgba(16,185,129,0.08); border-radius:10px; border:1px solid rgba(16,185,129,0.35)">
-                        <div>
-                          <span style="color:#34d399">●</span> <strong>Rani</strong> (Android 14 · Keep-Alive)
-                        </div>
-                        <span style="background:rgba(16,185,129,0.18); color:#34d399; padding:2px 8px; border-radius:6px">ssh://redis-edge-sg</span>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div class="ot-toast" id="r2-toast">Added rani@opentermius.local to Team Vault (Admin)</div>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <!-- ====================================================
-               REEL 03: Auto-Online / Offline Fallback & E2EE Sync
-               ==================================================== -->
-          <div class="sim-reel" data-reel-pane="2">
-            <div class="ot-app">
-              <aside class="ot-sidebar">
-                <div>
-                  <div class="ot-vault-btn">
-                    <div>
-                      <div style="font-size:10px; color:#34d399; text-transform:uppercase">Personal Vault</div>
-                      <div>My Servers</div>
-                    </div>
-                  </div>
-                  <div class="ot-nav-item active"><span>▣</span><span>Hosts (3)</span></div>
-                  <div class="ot-nav-item"><span>🔑</span><span>Keychain</span></div>
-                </div>
-                <div class="mono" id="r3-status-badge" style="font-size:11px; color:#34d399; padding:8px 10px; background:rgba(16,185,129,0.1); border-radius:8px; border:1px solid rgba(16,185,129,0.3); transition:all 0.3s ease">
-                  ● Online · Gateway
-                </div>
-              </aside>
-
-              <div class="ot-main">
-                <div class="ot-header">
-                  <span style="font-size:12.5px; font-weight:700">Zero-Knowledge AES-256-GCM Vault &amp; Offline Queue</span>
-                  <span class="ot-btn ot-btn-ctrl" id="r3-add-host-btn">+ Add Host</span>
-                </div>
-
-                <div class="ot-body">
-                  <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px; flex:1">
-                    <div style="background:#0f111a; border:1px solid var(--border); border-radius:14px; padding:16px; display:flex; flex-direction:column; gap:10px">
-                      <div class="mono" style="font-size:11px; color:var(--emerald-hi)">Client-Side WebCrypto Sandbox</div>
-                      <div style="font-size:13px; font-weight:700">New Host Entry</div>
-                      <div class="mono" style="font-size:11.5px; background:#08090e; border:1px solid var(--border); padding:9px 12px; border-radius:8px; color:#fff">
-                        Label: <span id="r3-host-lbl">edge-cache-tokyo</span><br />
-                        Addr : <span style="color:#34d399">172.16.40.19:22</span>
-                      </div>
-                      <div class="mono" id="r3-cipher-box" style="font-size:11px; background:#08090e; border:1px solid rgba(16,185,129,0.3); padding:9px 12px; border-radius:8px; color:#94a3b8">
-                        Algorithm : PBKDF2-SHA256 + AES-256-GCM<br />
-                        Nonce (IV): <span style="color:#22d3ee">9f4a1c80b21e44d190a2b3c4</span><br />
-                        Ciphertext: <span style="color:#34d399">e49b01a7...f83c2910 (Encrypted)</span>
-                      </div>
-                    </div>
-
-                    <div class="ot-term-pane mono">
-                      <div class="ot-term-bar">
-                        <span>Sync &amp; Heartbeat Telemetry</span>
-                        <span id="r3-queue-pill" style="color:#34d399">Queue: 0 pending</span>
-                      </div>
-                      <div class="ot-term-screen" id="r3-log-lines" style="font-size:11.5px">
-                        <div style="color:#34d399">[00:01] Heartbeat OK → Gateway Online</div>
-                      </div>
-                    </div>
-                  </div>
-                  <div class="ot-toast" id="r3-toast">Synced 1 local item(s) to your Personal Vault.</div>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <!-- ====================================================
-               REEL 04: Android Keep-Alive, Focus Mode & 2x7 Keys
-               ==================================================== -->
-          <div class="sim-reel" data-reel-pane="3">
-            <div class="phone-stage">
-              <div class="phone-frame">
-                <!-- Persistent Foreground Service Notification -->
-                <div class="phone-notif" id="r4-notif">
-                  <div style="display:flex; justify-content:space-between; align-items:center">
-                    <span style="font-weight:700; color:#34d399">OpenTermius · Keep-Alive Service</span>
-                    <span class="mono" style="font-size:9.5px; color:#94a3b8">now</span>
-                  </div>
-                  <div style="color:#cbd5e1; margin-top:2px; font-size:10.5px">
-                    2 active SSH sessions · PARTIAL_WAKE_LOCK active
-                  </div>
-                </div>
-
-                <!-- Collapsible Outer Mobile Header -->
-                <div class="phone-app-header" id="r4-phone-header">
-                  <span style="color:#94a3b8">←</span>
-                  <span style="font-weight:700; font-size:11.5px; background:#161620; border:1px solid #282838; padding:3px 10px; border-radius:999px">
-                    ● prod-k8s-worker-01 ▾
-                  </span>
-                  <span style="color:#34d399">＋</span>
-                </div>
-
-                <!-- Compact Mobile Terminal Toolbar -->
-                <div style="height:34px; background:#0d0d12; border-bottom:1px solid #1a1a24; display:flex; align-items:center; justify-content:space-between; padding:0 10px; font-size:11px">
-                  <div style="display:flex; align-items:center; gap:6px">
-                    <span class="pulse-dot" style="width:6px;height:6px"></span>
-                    <span style="font-weight:600">prod-k8s-worker-01</span>
-                  </div>
-                  <div style="display:flex; align-items:center; gap:5px">
-                    <span id="r4-focus-btn" style="padding:3px 6px; border-radius:5px; background:#181822; color:#cbd5e1; font-size:10px" title="Focus Mode">⤢</span>
-                    <span style="padding:3px 6px; border-radius:5px; background:rgba(16,185,129,0.18); color:#34d399; font-size:10px">⌨</span>
-                    <span id="r4-more-btn" style="padding:3px 6px; border-radius:5px; background:#181822; color:#cbd5e1; font-size:10px">⋮</span>
-                  </div>
-                </div>
-
-                <!-- Phone Terminal Screen -->
-                <div class="mono" style="padding:12px; min-height:175px; font-size:11.5px; line-height:1.6; background:#07080c">
-                  <div style="color:#64748b"># Real-time Android IME streaming (no word buffering)</div>
-                  <div style="margin-top:6px">
-                    <span style="color:#34d399">root@node01:~#</span> <span id="r4-typed"></span><span style="display:inline-block;width:6px;height:12px;background:#10b981;vertical-align:middle"></span>
-                  </div>
-                  <div id="r4-htop-out" style="margin-top:8px; color:#cbd5e1; display:none">
-                    CPU[|||||| &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;18.4%] &nbsp;Tasks: 42<br />
-                    MEM[|||||||||| &nbsp;&nbsp;&nbsp;&nbsp;1.42G/4.00G]<br />
-                    SWP[ &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;0K/2.00G]
-                  </div>
-                </div>
-
-                <!-- Termux 2x7 Extra Keys -->
-                <div class="termux-grid mono">
-                  <div class="termux-row">
-                    <span class="t-key">ESC</span><span class="t-key">/</span><span class="t-key">-</span><span class="t-key">HOME</span><span class="t-key">↑</span><span class="t-key">END</span><span class="t-key">PGUP</span>
-                  </div>
-                  <div class="termux-row">
-                    <span class="t-key">TAB</span><span class="t-key" id="r4-key-ctrl">CTRL</span><span class="t-key">ALT</span><span class="t-key">←</span><span class="t-key">↓</span><span class="t-key">→</span><span class="t-key">PGDN</span>
-                  </div>
-                </div>
-              </div>
-
-              <div style="display:flex; flex-direction:column; gap:14px">
-                <div class="sec-eyebrow mono" style="margin:0">// Mobile Ergonomics</div>
-                <h3 style="font-size:24px; font-weight:800; letter-spacing:-0.02em">
-                  Stays connected when locked. Built for one-thumb control.
-                </h3>
-                <p style="color:var(--muted); font-size:14.5px">
-                  Tap <strong>Focus Mode (⤢)</strong> for extra screen space, type smoothly with 2x7 Extra Keys, and keep SSH alive in the background.
-                </p>
-              </div>
-            </div>
-          </div>
-
-          <!-- ====================================================
-               REEL 05: Host Stop-Share Auto-Close & Native SFTP
-               ==================================================== -->
-          <div class="sim-reel" data-reel-pane="4">
-            <div class="ot-app">
-              <aside class="ot-sidebar">
-                <div>
-                  <div class="ot-vault-btn">
-                    <div>
-                      <div style="font-size:10px; color:#34d399; text-transform:uppercase">Team Vault</div>
-                      <div>Infra Production</div>
-                    </div>
-                  </div>
-                  <div class="ot-nav-item active"><span>&gt;_</span><span>Active Relay &amp; SFTP</span></div>
-                </div>
-                <div class="mono" style="font-size:11px; color:#34d399; padding:8px 10px">
-                  ● russh + russh-sftp
-                </div>
-              </aside>
-
-              <div class="ot-main">
-                <div class="ot-header">
-                  <span style="font-size:12.5px; font-weight:700">Host Stop-Sharing Lifecycle &amp; Native SFTP</span>
-                  <span class="ot-btn" id="r5-stop-btn" style="background:rgba(16,185,129,0.18); border:1px solid rgba(16,185,129,0.4); color:#34d399">
-                    Sharing (2) ×
-                  </span>
-                </div>
-
-                <div class="ot-body">
-                  <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px; flex:1">
-                    <!-- Left: SFTP Browser -->
-                    <div style="background:#0f111a; border:1px solid var(--border); border-radius:14px; padding:14px; display:flex; flex-direction:column; gap:8px">
-                      <div style="display:flex; justify-content:space-between; align-items:center">
-                        <span class="mono" style="font-size:11.5px; color:#22d3ee">/etc/opentermius</span>
-                        <span class="mono" style="font-size:10.5px; color:#34d399">russh-sftp</span>
-                      </div>
-                      <div class="mono" style="font-size:11.5px; padding:8px 10px; background:#141724; border-radius:8px; display:flex; justify-content:space-between">
-                        <span>📁 migrations/</span><span style="color:var(--muted)">4.0 KB</span>
-                      </div>
-                      <div class="mono" style="font-size:11.5px; padding:8px 10px; background:#141724; border-radius:8px; display:flex; justify-content:space-between">
-                        <span>📄 .env</span><span style="color:var(--muted)">chmod 600</span>
-                      </div>
-                      <div class="mono" style="font-size:11.5px; padding:8px 10px; background:rgba(16,185,129,0.1); border:1px solid rgba(16,185,129,0.3); border-radius:8px; display:flex; justify-content:space-between">
-                        <span>📦 server-linux-arm64</span><span id="r5-upload-pct" style="color:#34d399">Uploading 45%...</span>
-                      </div>
-                    </div>
-
-                    <!-- Right: Remote Viewer Reaction when Host Stops Sharing -->
-                    <div style="background:#0f111a; border:1px solid var(--border); border-radius:14px; padding:14px; display:flex; flex-direction:column; justify-content:space-between">
-                      <div>
-                        <div class="mono" style="font-size:11px; color:#a5b4fc; text-transform:uppercase">Remote Viewer State (Dika)</div>
-                        <div id="r5-viewer-state" style="margin-top:10px; padding:12px; border-radius:10px; background:#141724; border:1px solid var(--border); font-size:12px">
-                          <strong style="color:#34d399">● Connected to Relay</strong><br />
-                          <span style="color:var(--muted)">Streaming binary PTY frames from host...</span>
-                        </div>
-                      </div>
-                      <div style="display:flex; justify-content:space-between; align-items:center; padding-top:10px; border-top:1px solid var(--border)">
-                        <span class="mono" style="font-size:11px; color:var(--muted)">Team Live SSH Action:</span>
-                        <div id="r5-rejoin-state">
-                          <span class="ot-btn ot-btn-rejoin">Rejoin (Control)</span>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                  <div class="ot-toast" id="r5-toast">Host stopped sharing this session · Remote tab closed</div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- Bottom Video HUD -->
-        <div class="reel-hud mono">
-          <div class="hud-left">
-            <span class="hud-badge" id="hud-step-badge">STEP 1/4</span>
-            <span class="hud-step-text" id="hud-step-desc">Teammate clicks Request Control on an active Team Live SSH session...</span>
-          </div>
-          <div class="hud-controls">
-            <button type="button" class="copy-btn mono" id="reel-toggle">⏸ Pause Reel</button>
-          </div>
+  <main>
+    <div class="hero wrap">
+      <h1>
+        Native Rust SSH with<br />
+        <span class="hero-accent">Team Vaults and Live Relay.</span>
+      </h1>
+      <p class="hero-sub">
+        Fast SSH, SFTP, and port forwarding for macOS, Windows, and Android. Sync encrypted vaults on your own server with no paywall.
+      </p>
+      <div class="hero-actions">
+        <a
+          class="btn-primary"
+          id="hero-download-btn"
+          href="https://github.com/Open-Foundation-Org/OpenTermius/releases/download/v0.7.0/OpenTermius_0.7.0_macOS_aarch64.dmg"
+        >
+          <span id="hero-download-label">Download OpenTermius v0.7.0</span>
+          <span class="mono" aria-hidden="true">↓</span>
+        </a>
+        <div class="hero-alt-links">
+          <a href="#download">All platforms (macOS, Windows, Android)</a>
+          <a href="#self-host">Deploy self-hosted Gateway</a>
         </div>
       </div>
     </div>
-  </div>
 
-  <!-- Exclusive Engineering Highlights (Asymmetrical Bento) -->
-  <section id="exclusive">
-    <div class="wrap">
-      <div class="sec-head reveal">
-        <span class="sec-eyebrow mono">// Core Highlights</span>
-        <h2>Built for teams. Free forever.</h2>
-        <p class="sec-desc">
-          Every collaboration, sync, and mobile feature included out of the box.
-        </p>
-      </div>
+    <div class="showcase-wrap wrap reveal" id="showcase">
+      <div class="showcase-card">
+        <div class="showcase-tabs" role="tablist" aria-label="Product capabilities">
+          <button type="button" class="tab-btn active" data-tab="0" role="tab" aria-selected="true">Live team relay</button>
+          <button type="button" class="tab-btn" data-tab="1" role="tab" aria-selected="false">SSH, tunnels &amp; SFTP</button>
+          <button type="button" class="tab-btn" data-tab="2" role="tab" aria-selected="false">Gateway console</button>
+          <button type="button" class="tab-btn" data-tab="3" role="tab" aria-selected="false">Android mobile</button>
+        </div>
 
-      <div class="bento-grid">
-        <div class="bezel-shell span-7 reveal">
-          <div class="bezel-core bento-core">
-            <div class="bento-idx mono">
-              <span>01 // Blind Relay</span>
-              <span>WebSocket</span>
+        <div class="showcase-stage">
+          <div class="stage-pane active" data-pane="0">
+            <div class="mock-window">
+              <div class="mock-titlebar">
+                <span class="mock-dots"><span class="mock-dot online"></span> Team Live SSH</span>
+                <span class="mono">Blind WebSocket relay</span>
+              </div>
+              <div class="mock-body">
+                <div class="mock-row">
+                  <div>
+                    <strong>prod-k8s-worker-01</strong>
+                    <div class="meta-note mono">Wisnu · macOS Desktop · 2 connected</div>
+                  </div>
+                  <span class="status-ok mono">Rejoin (Control)</span>
+                </div>
+                <div class="mock-row">
+                  <div>
+                    <strong>db-primary-02</strong>
+                    <div class="meta-note mono">Dika · Android Device</div>
+                  </div>
+                  <span class="mono">Request View</span>
+                </div>
+              </div>
             </div>
-            <h3>Live Request Remote &amp; 1-Click Rejoin</h3>
-            <p>
-              Share active SSH sessions in Team Vaults with View or Control access while SSH stays 100% on your device.
-            </p>
-            <ul class="spec-list mono">
-              <li class="spec-chip">1-Click Rejoin</li>
-              <li class="spec-chip">Live participant avatars</li>
-              <li class="spec-chip">Typing indicator</li>
-              <li class="spec-chip">Auto-close on stop</li>
-            </ul>
+            <div class="pane-copy">
+              <h3>Share live SSH sessions on demand</h3>
+              <p>Teammates request View or Control access right from the Hosts screen. Your SSH connection stays on your device while frames stream through the relay.</p>
+              <ul class="pane-list">
+                <li>Real-time approval popup for host owners</li>
+                <li>One-click Rejoin if you close your tab</li>
+                <li>Live participant avatars and typing indicator</li>
+              </ul>
+            </div>
+          </div>
+
+          <div class="stage-pane" data-pane="1">
+            <div class="mock-window">
+              <div class="mock-titlebar">
+                <span class="mock-dots"><span class="mock-dot online"></span> Native russh &amp; SFTP</span>
+                <span class="mono">Quick Connect ⌘K</span>
+              </div>
+              <div class="mock-body mono">
+                <div class="mock-row">
+                  <span>ssh-keygen (Ed25519 / RSA-4096)</span>
+                  <span class="status-ok">Valid PEM</span>
+                </div>
+                <div class="mock-row">
+                  <span>Tunnel 127.0.0.1:5432 → db:5432</span>
+                  <span class="status-ok">Active</span>
+                </div>
+                <div class="mock-row">
+                  <span>SFTP /etc/opentermius (rename, dotfiles)</span>
+                  <span class="status-ok">Ready</span>
+                </div>
+              </div>
+            </div>
+            <div class="pane-copy">
+              <h3>Built-in keygen, tunnels, and SFTP</h3>
+              <p>Generate real Ed25519 or RSA-4096 keys, forward local or SOCKS5 ports over SSH, and manage remote files in a dual-pane browser.</p>
+              <ul class="pane-list">
+                <li>Keyboard navigation in Quick Connect and Split Picker</li>
+                <li>Local (-L) and Dynamic SOCKS5 (-D) port forwarding</li>
+                <li>Rename files, toggle dotfiles, and drag-and-drop transfer</li>
+              </ul>
+            </div>
+          </div>
+
+          <div class="stage-pane" data-pane="2">
+            <div class="mock-window">
+              <div class="mock-titlebar">
+                <span class="mock-dots"><span class="mock-dot online"></span> Gateway Admin Console</span>
+                <span class="mono">AES-256-GCM</span>
+              </div>
+              <div class="mock-body mono">
+                <div class="mock-row">
+                  <span>Online devices: 3</span>
+                  <span class="status-ok">Active SSH: 2</span>
+                </div>
+                <div class="mock-row">
+                  <span>Team Vault: Infra Production</span>
+                  <span class="status-ok">5 members</span>
+                </div>
+                <div class="mock-row">
+                  <span>Offline queue fallback</span>
+                  <span class="status-ok">Auto-sync</span>
+                </div>
+              </div>
+            </div>
+            <div class="pane-copy">
+              <h3>Self-hosted sync you control</h3>
+              <p>Run the Go + PostgreSQL Gateway on your own server. Vault secrets are encrypted on your device before sync, and offline edits queue automatically.</p>
+              <ul class="pane-list">
+                <li>Invite teammates by email with self-service password setup</li>
+                <li>Manage Team Vault members and roles</li>
+                <li>Automatic offline local cache and reconnect sync</li>
+              </ul>
+            </div>
+          </div>
+
+          <div class="stage-pane" data-pane="3">
+            <div class="mock-window">
+              <div class="mock-titlebar">
+                <span class="mock-dots"><span class="mock-dot online"></span> Android Foreground Service</span>
+                <span class="mono">WakeLock active</span>
+              </div>
+              <div class="mock-body mono">
+                <div class="mock-row">
+                  <span>2 active SSH sessions</span>
+                  <span class="status-ok">Keep-Alive</span>
+                </div>
+                <div class="mock-row">
+                  <span>Focus Mode &amp; 2x7 Extra Keys</span>
+                  <span class="status-ok">ESC TAB CTRL ↑↓</span>
+                </div>
+              </div>
+            </div>
+            <div class="pane-copy">
+              <h3>Reliable SSH on Android</h3>
+              <p>Keep SSH connections alive when your screen locks or you switch apps. Collapse headers with Focus Mode and type fast with 2x7 extra keys.</p>
+              <ul class="pane-list">
+                <li>Unbuffered IME input for smooth typing</li>
+                <li>Touch selection handles with Copy and Paste</li>
+                <li>Zero ads, zero trackers, Apache-2.0 licensed</li>
+              </ul>
+            </div>
           </div>
         </div>
 
-        <div class="bezel-shell span-5 reveal">
-          <div class="bezel-core bento-core">
-            <div class="bento-idx mono">
-              <span>02 // Admin Portal</span>
-              <span>Gateway Web</span>
-            </div>
-            <h3>Gateway Web Admin Console</h3>
-            <p>
-              Manage users, Team Vault roles, and monitor online devices and active SSH sessions in real time.
-            </p>
-            <ul class="spec-list mono">
-              <li class="spec-chip">Zero-knowledge storage</li>
-              <li class="spec-chip">Live presence</li>
-              <li class="spec-chip">Audit logs</li>
-            </ul>
-          </div>
-        </div>
-
-        <div class="bezel-shell span-4 reveal">
-          <div class="bezel-core bento-core">
-            <div class="bento-idx mono">
-              <span>03 // Hybrid Sync</span>
-              <span>AES-256-GCM</span>
-            </div>
-            <h3>Auto-Online &amp; Offline Fallback</h3>
-            <p>
-              Switches to local encrypted storage when offline and syncs queued changes automatically on reconnect.
-            </p>
-          </div>
-        </div>
-
-        <div class="bezel-shell span-4 reveal">
-          <div class="bezel-core bento-core">
-            <div class="bento-idx mono">
-              <span>04 // Mobile</span>
-              <span>Android</span>
-            </div>
-            <h3>Keep-Alive &amp; Focus Mode</h3>
-            <p>
-              Keeps SSH sessions alive when minimized or locked, with Focus Mode and 2x7 Extra Keys.
-            </p>
-          </div>
-        </div>
-
-        <div class="bezel-shell span-4 reveal">
-          <div class="bezel-core bento-core">
-            <div class="bento-idx mono">
-              <span>05 // Native Engine</span>
-              <span>Rust</span>
-            </div>
-            <h3>Native SSH &amp; SFTP Browser</h3>
-            <p>
-              Fast <code>russh</code> terminal with split panes, SFTP file transfers, and ED25519/RSA key management.
-            </p>
-          </div>
+        <div class="showcase-bar">
+          <span id="showcase-status">Team Live SSH: 1-click Remote Control and Rejoin over WebSocket relay</span>
+          <button type="button" class="ghost-btn" id="showcase-toggle">Pause preview</button>
         </div>
       </div>
     </div>
-  </section>
 
-  <!-- 1-Command Self-Host Gateway Installer -->
-  <section id="self-host">
-    <div class="wrap">
-      <div class="sec-head reveal">
-        <span class="sec-eyebrow mono">// Self-Host</span>
-        <h2>Deploy your Gateway in one command.</h2>
-        <p class="sec-desc">
-          Works on Linux and macOS. Sets up PostgreSQL, Gateway API, and Web Console automatically.
-        </p>
-      </div>
-
-      <div class="bezel-shell reveal">
-        <div class="bezel-core bento-core">
-          <div class="bento-idx mono">
-            <span>Quick Install</span>
-            <span>scripts/install.sh</span>
-          </div>
-          <p>Run on your server or Mac:</p>
-          <div class="cmd-box">
-            <code id="cmd-install">curl -fsSL https://raw.githubusercontent.com/Open-Foundation-Org/OpenTermius/main/scripts/install.sh | bash</code>
-            <button type="button" class="copy-btn mono" data-copy="cmd-install">Copy</button>
-          </div>
-
-          <p style="margin-top:22px">Or use an external PostgreSQL database (such as Supabase):</p>
-          <div class="cmd-box">
-            <code id="cmd-supabase">DATABASE_URL="postgres://user:pass@host:5432/postgres?sslmode=require" curl -fsSL https://raw.githubusercontent.com/Open-Foundation-Org/OpenTermius/main/scripts/install.sh | bash</code>
-            <button type="button" class="copy-btn mono" data-copy="cmd-supabase">Copy</button>
-          </div>
+    <section id="features">
+      <div class="wrap">
+        <div class="sec-head reveal">
+          <h2>Built for teams. Free forever.</h2>
+          <p>Every collaboration, sync, and security feature is included without per-seat fees.</p>
         </div>
-      </div>
-    </div>
-  </section>
 
-  <!-- Comparison Table -->
-  <section id="compare">
-    <div class="wrap">
-      <div class="sec-head reveal">
-        <span class="sec-eyebrow mono">// Feature Parity</span>
-        <h2>Everything unlocked. Zero per-seat tax.</h2>
-      </div>
-
-      <div class="bezel-shell reveal">
-        <div class="bezel-core" style="padding:0">
-          <div class="matrix-wrap">
-            <table class="matrix">
-              <thead>
-                <tr>
-                  <th>Capability</th>
-                  <th>OpenTermius v0.7.0 (Apache-2.0)</th>
-                  <th>Commercial SSH Clients</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr>
-                  <td>Live Request Remote (View &amp; Control) + 1-Click Rejoin</td>
-                  <td><span class="tag-free mono">✓ Included (Zero-SSH Blind Relay)</span></td>
-                  <td class="tag-paid">Enterprise / Team plan only</td>
-                </tr>
-                <tr>
-                  <td>Self-Hosted Gateway Web Admin Console</td>
-                  <td><span class="tag-free mono">✓ Included (Full data ownership)</span></td>
-                  <td class="tag-paid">Vendor cloud only</td>
-                </tr>
-                <tr>
-                  <td>E2EE Personal &amp; Team Vault Sync</td>
-                  <td><span class="tag-free mono">✓ Included (Unlimited teammates)</span></td>
-                  <td class="tag-paid">Paid per-user monthly subscription</td>
-                </tr>
-                <tr>
-                  <td>Native SFTP File Manager (<code>russh-sftp</code>)</td>
-                  <td><span class="tag-free mono">✓ Included</span></td>
-                  <td class="tag-paid">Pro tier required</td>
-                </tr>
-                <tr>
-                  <td>Android Background SSH Keep-Alive &amp; Focus Mode</td>
-                  <td><span class="tag-free mono">✓ Included</span></td>
-                  <td class="tag-paid">Varies</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </div>
-      </div>
-    </div>
-  </section>
-
-  <!-- Download & macOS Gatekeeper Note -->
-  <section id="download">
-    <div class="wrap">
-      <div class="sec-head reveal">
-        <span class="sec-eyebrow mono">// Native Binaries</span>
-        <h2>Download OpenTermius v0.7.0</h2>
-        <p class="sec-desc">Lightweight native installers built with Tauri v2 and Rust.</p>
-      </div>
-
-      <div class="bento-grid">
-        <div class="bezel-shell span-4 reveal">
-          <div class="bezel-core bento-core" style="display:flex; flex-direction:column; justify-content:space-between; gap:20px">
+        <div class="feature-grid">
+          <article class="surface-card reveal">
             <div>
-              <div class="bento-idx mono">
-                <span>macOS Desktop</span>
-                <span>Apple Silicon (aarch64)</span>
-              </div>
-              <h3>OpenTermius for macOS (.dmg)</h3>
-              <p>Native WKWebView + Rust <code>russh</code> engine, split terminal panes, SFTP browser, and Team Relay.</p>
+              <h3>Live terminal sharing</h3>
+              <p>Share active SSH sessions in Team Vaults with View or Control access and 1-click Rejoin.</p>
             </div>
-            <a class="btn-island btn-primary" style="width:max-content" href="https://github.com/Open-Foundation-Org/OpenTermius/releases/latest">
+          </article>
+
+          <article class="surface-card reveal">
+            <div>
+              <h3>Native Rust SSH and SFTP</h3>
+              <p>Connect directly from your device with <code>russh</code>, split terminal panes, and a dual-pane SFTP file manager.</p>
+            </div>
+          </article>
+
+          <article class="surface-card reveal">
+            <div>
+              <h3>Real keygen and port forwarding</h3>
+              <p>Generate Ed25519 or RSA-4096 keys and open local (-L) or SOCKS5 (-D) SSH tunnels natively.</p>
+            </div>
+          </article>
+
+          <article class="surface-card reveal">
+            <div>
+              <h3>Zero-knowledge vault sync</h3>
+              <p>Passwords, keys, snippets, and identities are encrypted on your device with AES-256-GCM before upload.</p>
+            </div>
+          </article>
+
+          <article class="surface-card reveal">
+            <div>
+              <h3>Automatic offline fallback</h3>
+              <p>Keep working when your Gateway is unreachable. Edits save locally and sync automatically once back online.</p>
+            </div>
+          </article>
+
+          <article class="surface-card reveal">
+            <div>
+              <h3>Standalone or self-hosted</h3>
+              <p>Use OpenTermius offline on one device or connect to your own Go + PostgreSQL Gateway.</p>
+            </div>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section id="self-host">
+      <div class="wrap">
+        <div class="sec-head reveal">
+          <h2>Deploy your Gateway in one command</h2>
+          <p>Runs on Linux and macOS. Installs PostgreSQL, the Gateway API, and the Web Admin Console automatically.</p>
+        </div>
+
+        <div class="surface-card reveal">
+          <div class="cmd-stack">
+            <div>
+              <p class="cmd-label">Run on your server or Mac:</p>
+              <div class="cmd-box">
+                <code id="cmd-install">curl -fsSL https://raw.githubusercontent.com/Open-Foundation-Org/OpenTermius/main/scripts/install.sh | bash</code>
+                <button type="button" class="ghost-btn" data-copy="cmd-install">Copy</button>
+              </div>
+            </div>
+
+            <div>
+              <p class="cmd-label">Or connect an external PostgreSQL database:</p>
+              <div class="cmd-box">
+                <code id="cmd-supabase">DATABASE_URL="postgres://user:pass@host:5432/postgres?sslmode=require" curl -fsSL https://raw.githubusercontent.com/Open-Foundation-Org/OpenTermius/main/scripts/install.sh | bash</code>
+                <button type="button" class="ghost-btn" data-copy="cmd-supabase">Copy</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="compare">
+      <div class="wrap">
+        <div class="sec-head reveal">
+          <h2>Everything unlocked. No per-seat tax.</h2>
+        </div>
+
+        <div class="table-card reveal">
+          <table class="matrix">
+            <thead>
+              <tr>
+                <th>Capability</th>
+                <th>OpenTermius v0.7.0 (Apache-2.0)</th>
+                <th>Commercial SSH Clients</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Live Request Remote (View and Control) + Rejoin</td>
+                <td><span class="tag-free">Included (Blind WebSocket Relay)</span></td>
+                <td class="tag-paid">Enterprise or Team plan only</td>
+              </tr>
+              <tr>
+                <td>Self-Hosted Gateway Web Admin Console</td>
+                <td><span class="tag-free">Included (Full data ownership)</span></td>
+                <td class="tag-paid">Vendor cloud only</td>
+              </tr>
+              <tr>
+                <td>E2EE Personal and Team Vault Sync</td>
+                <td><span class="tag-free">Included (Unlimited teammates)</span></td>
+                <td class="tag-paid">Paid monthly per user</td>
+              </tr>
+              <tr>
+                <td>Native SFTP, Keygen, and Port Forwarding</td>
+                <td><span class="tag-free">Included</span></td>
+                <td class="tag-paid">Pro tier required</td>
+              </tr>
+              <tr>
+                <td>Android Background Keep-Alive and Focus Mode</td>
+                <td><span class="tag-free">Included</span></td>
+                <td class="tag-paid">Varies</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <section id="download">
+      <div class="wrap">
+        <div class="sec-head reveal">
+          <h2>Download OpenTermius v0.7.0</h2>
+          <p>Lightweight native installers built with Tauri v2 and Rust.</p>
+        </div>
+
+        <div class="download-grid">
+          <div class="surface-card reveal">
+            <div>
+              <h3>macOS (.dmg)</h3>
+              <p>Apple Silicon (aarch64) with native <code>russh</code> engine, split panes, SFTP, and Team Relay.</p>
+            </div>
+            <a
+              class="btn-card"
+              id="dl-mac"
+              href="https://github.com/Open-Foundation-Org/OpenTermius/releases/download/v0.7.0/OpenTermius_0.7.0_macOS_aarch64.dmg"
+            >
               <span>Download macOS .DMG</span>
-              <span class="btn-icon-circle mono">↓</span>
+              <span class="mono" aria-hidden="true">↓</span>
             </a>
           </div>
-        </div>
 
-        <div class="bezel-shell span-4 reveal">
-          <div class="bezel-core bento-core" style="display:flex; flex-direction:column; justify-content:space-between; gap:20px">
+          <div class="surface-card reveal">
             <div>
-              <div class="bento-idx mono">
-                <span>Windows Desktop</span>
-                <span>x64 NSIS (.exe)</span>
-              </div>
-              <h3>OpenTermius for Windows (.exe)</h3>
-              <p>Native WebView2 + Rust <code>russh</code> engine, split terminal panes, SFTP browser, and Team Relay.</p>
+              <h3>Windows (.exe)</h3>
+              <p>x64 NSIS installer with WebView2, native <code>russh</code> engine, SFTP, and Team Relay.</p>
             </div>
-            <a class="btn-island btn-primary" style="width:max-content" href="https://github.com/Open-Foundation-Org/OpenTermius/releases/latest">
+            <a
+              class="btn-card"
+              id="dl-win"
+              href="https://github.com/Open-Foundation-Org/OpenTermius/releases/download/v0.7.0/OpenTermius_0.7.0_windows_x64-setup.exe"
+            >
               <span>Download Windows .EXE</span>
-              <span class="btn-icon-circle mono">↓</span>
+              <span class="mono" aria-hidden="true">↓</span>
             </a>
           </div>
-        </div>
 
-        <div class="bezel-shell span-4 reveal">
-          <div class="bezel-core bento-core" style="display:flex; flex-direction:column; justify-content:space-between; gap:20px">
+          <div class="surface-card reveal">
             <div>
-              <div class="bento-idx mono">
-                <span>Android Mobile &amp; Tablet</span>
-                <span>Universal APK</span>
-              </div>
-              <h3>OpenTermius for Android (.apk)</h3>
-              <p>Includes Foreground Keep-Alive Service, Focus Mode, 2x7 Termux Extra Keys, and touch selection handles.</p>
+              <h3>Android (.apk)</h3>
+              <p>Universal APK with Foreground Keep-Alive Service, Focus Mode, and 2x7 extra keys.</p>
             </div>
-            <a class="btn-island btn-primary" style="width:max-content" href="https://github.com/Open-Foundation-Org/OpenTermius/releases/latest">
+            <a
+              class="btn-card"
+              id="dl-android"
+              href="https://github.com/Open-Foundation-Org/OpenTermius/releases/download/v0.7.0/OpenTermius_0.7.0_android_universal.apk"
+            >
               <span>Download Android .APK</span>
-              <span class="btn-icon-circle mono">↓</span>
+              <span class="mono" aria-hidden="true">↓</span>
             </a>
           </div>
         </div>
 
-        <div class="bezel-shell span-6 reveal">
-          <div class="bezel-core bento-core">
-            <div class="bento-idx mono">
-              <span>macOS Gatekeeper Note (Un-notarized OSS Build)</span>
-              <span>Run Once After Install</span>
-            </div>
-            <p>
-              If macOS displays <code>"OpenTermius" is damaged and can't be opened</code> after downloading via browser, drag <code>OpenTermius.app</code> into <code>/Applications</code> and clear the quarantine attribute once:
-            </p>
-            <div class="cmd-box">
-              <code id="cmd-xattr">xattr -cr /Applications/OpenTermius.app</code>
-              <button type="button" class="copy-btn mono" data-copy="cmd-xattr">Copy</button>
+        <div class="notes-grid">
+          <div class="surface-card reveal">
+            <div>
+              <h3>macOS Gatekeeper note</h3>
+              <p>If macOS says <code>OpenTermius is damaged</code> on an un-notarized build, move <code>OpenTermius.app</code> to Applications and run once:</p>
+              <div class="cmd-box">
+                <code id="cmd-xattr">xattr -cr /Applications/OpenTermius.app</code>
+                <button type="button" class="ghost-btn" data-copy="cmd-xattr">Copy</button>
+              </div>
             </div>
           </div>
-        </div>
 
-        <div class="bezel-shell span-6 reveal">
-          <div class="bezel-core bento-core">
-            <div class="bento-idx mono">
-              <span>Windows SmartScreen Note (Un-signed OSS Build)</span>
-              <span>Run Once On Install</span>
+          <div class="surface-card reveal">
+            <div>
+              <h3>Windows SmartScreen and privacy</h3>
+              <p>If SmartScreen prompts on first install, choose <strong>More info</strong> then <strong>Run anyway</strong>.</p>
+              <p class="meta-note" style="margin-top: 10px;">
+                OpenTermius is open-source (<a class="inline-link" href="https://github.com/Open-Foundation-Org/OpenTermius" target="_blank" rel="noopener">Apache-2.0</a>) with zero telemetry. Read the <a class="inline-link" href="privacy.html">Privacy Policy</a>.
+              </p>
             </div>
-            <p>
-              If Windows Defender SmartScreen prompts <code>Windows protected your PC</code> during first install, click <strong>More info</strong> &rarr; <strong>Run anyway</strong>.
-            </p>
-            <p style="margin-top:10px; font-size:12px; color:#94a3b8">
-              OpenTermius is 100% open-source (<a href="https://github.com/Open-Foundation-Org/OpenTermius" target="_blank" rel="noopener" style="color:#34d399">Apache-2.0</a>) with zero telemetry. Read our <a href="privacy.html" style="color:#34d399">Privacy Policy</a>.
-            </p>
           </div>
         </div>
       </div>
-    </div>
-  </section>
+    </section>
+  </main>
 
   <footer>
     <div class="wrap foot-row">
-      <span>© 2026 OpenTermius Contributors · Released under the Apache-2.0 License.</span>
-      <span class="mono">
-        <a href="https://github.com/Open-Foundation-Org/OpenTermius">GitHub</a> ·
-        <a href="https://github.com/Open-Foundation-Org/OpenTermius/releases">Releases</a> ·
+      <span>© 2026 OpenTermius Contributors · Apache-2.0 License</span>
+      <div class="foot-links">
+        <a href="https://github.com/Open-Foundation-Org/OpenTermius">GitHub</a>
+        <a href="https://github.com/Open-Foundation-Org/OpenTermius/releases">Releases</a>
         <a href="https://github.com/Open-Foundation-Org/OpenTermius/issues">Issues</a>
-      </span>
+        <a href="privacy.html">Privacy</a>
+      </div>
     </div>
   </footer>
 
-  <script>
-    (function () {
-      const REEL_DURATION = 8400; // 8.4s per reel
-      const reelBtns = document.querySelectorAll('[data-reel]');
-      const reelPanes = document.querySelectorAll('[data-reel-pane]');
-      const reelBars = document.querySelectorAll('[data-bar]');
-      const cursor = document.getElementById('sim-cursor');
-      const hudBadge = document.getElementById('hud-step-badge');
-      const hudDesc = document.getElementById('hud-step-desc');
-      const toggleBtn = document.getElementById('reel-toggle');
-
-      let currentReel = 0;
-      let elapsed = 0;
-      let playing = true;
-      let lastTick = performance.now();
-      let lastStepKey = '';
-
-      function moveCursor(x, y, click) {
-        if (!cursor) return;
-        cursor.style.transform = `translate(${x}px, ${y}px)`;
-        if (click) {
-          cursor.classList.remove('clicking');
-          void cursor.offsetWidth;
-          cursor.classList.add('clicking');
-        }
-      }
-
-      function setHud(badge, desc) {
-        if (hudBadge) hudBadge.textContent = badge;
-        if (hudDesc) hudDesc.textContent = desc;
-      }
-
-      // Choreographed Timeline per Reel (progress 0..1)
-      function applyReelFrame(reelIdx, p) {
-        const stepBucket = Math.floor(p * 4); // 0, 1, 2, 3
-        const stepKey = `${reelIdx}:${stepBucket}`;
-
-        if (reelIdx === 0) {
-          // REEL 01: Request Remote -> Approve -> Live Typing Tooltip -> 1-Click Rejoin
-          const approveModal = document.getElementById('r1-approve-modal');
-          const hostsView = document.getElementById('r1-hosts-view');
-          const termView = document.getElementById('r1-term-view');
-          const tabHosts = document.getElementById('r1-tab-hosts');
-          const tabRemote = document.getElementById('r1-tab-remote');
-          const toast = document.getElementById('r1-toast');
-          const typingPill = document.getElementById('r1-typing-pill');
-          const typedCmd = document.getElementById('r1-typed-cmd');
-          const cmdOut = document.getElementById('r1-cmd-output');
-          const btnView = document.getElementById('r1-btn-view');
-          const btnCtrl = document.getElementById('r1-btn-ctrl');
-          const btnRejoin = document.getElementById('r1-btn-rejoin');
-          const avatars = document.getElementById('r1-avatars');
-          const peerMeta = document.getElementById('r1-peer-meta');
-
-          if (stepBucket === 0) {
-            if (stepKey !== lastStepKey) {
-              hostsView.style.display = 'block';
-              termView.style.display = 'none';
-              tabRemote.style.display = 'none';
-              tabHosts.classList.add('active');
-              approveModal.classList.remove('show');
-              btnView.style.display = 'inline-flex';
-              btnCtrl.style.display = 'inline-flex';
-              btnRejoin.style.display = 'none';
-              avatars.innerHTML = '<span class="avatar av-emerald">WW</span>';
-              peerMeta.textContent = 'Wisnu · macOS Desktop';
-              toast.textContent = 'Requested control access to prod-k8s-worker-01...';
-              toast.classList.add('show');
-              moveCursor(820, 165, true);
-              setHud('REEL 01 · STEP 1/4', 'Teammate clicks "Request Control" on an active Team Live SSH session...');
-            }
-          } else if (stepBucket === 1) {
-            if (stepKey !== lastStepKey) {
-              approveModal.classList.add('show');
-              toast.classList.remove('show');
-              moveCursor(835, 165, true);
-              setHud('REEL 01 · STEP 2/4', 'Host receives real-time popup and clicks "Allow Control"...');
-            }
-          } else if (stepBucket === 2) {
-            const cmdStr = ' docker ps --format "table {{.ID}}\\t{{.Image}}\\t{{.Status}}"';
-            const subP = Math.min(1, (p - 0.5) / 0.2);
-            typedCmd.textContent = cmdStr.slice(0, Math.floor(subP * cmdStr.length));
-            cmdOut.style.display = subP >= 0.95 ? 'block' : 'none';
-            if (stepKey !== lastStepKey) {
-              approveModal.classList.remove('show');
-              hostsView.style.display = 'none';
-              termView.style.display = 'flex';
-              tabRemote.style.display = 'inline-flex';
-              tabRemote.classList.add('active');
-              tabHosts.classList.remove('active');
-              typingPill.classList.add('show');
-              moveCursor(560, 260, false);
-              setHud('REEL 01 · STEP 3/4', 'Shared terminal streams live with participant avatars & "Wisnu is typing..." tooltip!');
-            }
-          } else {
-            if (stepKey !== lastStepKey) {
-              hostsView.style.display = 'block';
-              termView.style.display = 'none';
-              tabHosts.classList.add('active');
-              tabRemote.classList.remove('active');
-              btnView.style.display = 'none';
-              btnCtrl.style.display = 'none';
-              btnRejoin.style.display = 'inline-flex';
-              avatars.innerHTML = '<span class="avatar av-emerald">WW</span><span class="avatar av-indigo">DK</span>';
-              peerMeta.textContent = 'Wisnu · macOS Desktop · 2 connected';
-              toast.textContent = 'Rejoined prod-k8s-worker-01 (control) without re-requesting!';
-              toast.classList.add('show');
-              moveCursor(830, 165, true);
-              setHud('REEL 01 · STEP 4/4', 'After closing tab, teammate clicks "Rejoin (Control)" for instant 1-click access.');
-            }
-          }
-        } else if (reelIdx === 1) {
-          // REEL 02: Gateway Web Admin Console
-          const newPeer = document.getElementById('r2-new-peer');
-          const statDev = document.getElementById('r2-stat-dev');
-          const statSsh = document.getElementById('r2-stat-ssh');
-          const statMem = document.getElementById('r2-stat-mem');
-          const toast = document.getElementById('r2-toast');
-
-          if (stepBucket === 0) {
-            if (stepKey !== lastStepKey) {
-              newPeer.style.display = 'none';
-              statDev.textContent = '2';
-              statSsh.textContent = '2';
-              statMem.textContent = '4';
-              toast.classList.remove('show');
-              moveCursor(480, 130, false);
-              setHud('REEL 02 · STEP 1/3', 'Gateway Web Console monitors online devices and active SSH sessions in real time.');
-            }
-          } else if (stepBucket === 1 || stepBucket === 2) {
-            if (stepKey !== lastStepKey) {
-              newPeer.style.display = 'flex';
-              statDev.textContent = '3';
-              statSsh.textContent = '3';
-              moveCursor(520, 320, false);
-              setHud('REEL 02 · STEP 2/3', 'New device heartbeat arrives: Rani (Android 14) appears online with active SSH session.');
-            }
-          } else {
-            if (stepKey !== lastStepKey) {
-              statMem.textContent = '5';
-              toast.classList.add('show');
-              moveCursor(835, 205, true);
-              setHud('REEL 02 · STEP 3/3', 'Admin invites teammate to shared Team Vault with role-based access control.');
-            }
-          }
-        } else if (reelIdx === 2) {
-          // REEL 03: Auto-Online / Offline Sync & E2EE
-          const badge = document.getElementById('r3-status-badge');
-          const queuePill = document.getElementById('r3-queue-pill');
-          const logs = document.getElementById('r3-log-lines');
-          const toast = document.getElementById('r3-toast');
-
-          if (stepBucket === 0) {
-            if (stepKey !== lastStepKey) {
-              badge.textContent = '● Online · Gateway';
-              badge.style.color = '#34d399';
-              badge.style.borderColor = 'rgba(16,185,129,0.3)';
-              queuePill.textContent = 'Queue: 0 pending';
-              queuePill.style.color = '#34d399';
-              logs.innerHTML = '<div style="color:#34d399">[00:01] Heartbeat OK → Gateway Online</div><div style="color:#cbd5e1">[00:02] Encrypting host via WebCrypto AES-256-GCM...</div>';
-              toast.classList.remove('show');
-              moveCursor(840, 22, true);
-              setHud('REEL 03 · STEP 1/3', 'Host credentials & private keys are encrypted client-side with AES-256-GCM.');
-            }
-          } else if (stepBucket === 1 || stepBucket === 2) {
-            if (stepKey !== lastStepKey) {
-              badge.textContent = '● Offline · Local';
-              badge.style.color = '#fbbf24';
-              badge.style.borderColor = 'rgba(245,158,11,0.4)';
-              queuePill.textContent = 'Queue: 1 pending op';
-              queuePill.style.color = '#fbbf24';
-              logs.innerHTML = '<div style="color:#34d399">[00:01] Heartbeat OK → Gateway Online</div><div style="color:#fbbf24">[00:04] Gateway unreachable → Auto-switched to Offline · Local</div><div style="color:#cbd5e1">[00:05] Saved host to local encrypted cache (queued op #1)</div>';
-              moveCursor(110, 420, false);
-              setHud('REEL 03 · STEP 2/3', 'Gateway unreachable: automatically switches to Offline · Local and queues edits.');
-            }
-          } else {
-            if (stepKey !== lastStepKey) {
-              badge.textContent = '● Online · Gateway';
-              badge.style.color = '#34d399';
-              badge.style.borderColor = 'rgba(16,185,129,0.3)';
-              queuePill.textContent = 'Queue: 0 pending (Flushed ✓)';
-              queuePill.style.color = '#34d399';
-              logs.innerHTML = '<div style="color:#fbbf24">[00:04] Gateway unreachable → Offline · Local</div><div style="color:#34d399">[00:07] Gateway reachable → Flushed 1 queued mutation ✓</div>';
-              toast.classList.add('show');
-              moveCursor(680, 320, false);
-              setHud('REEL 03 · STEP 3/3', 'Gateway reconnects: queued mutations flush automatically to Personal/Team Vault.');
-            }
-          }
-        } else if (reelIdx === 3) {
-          // REEL 04: Android Keep-Alive, Focus Mode & 2x7 Keys
-          const header = document.getElementById('r4-phone-header');
-          const notif = document.getElementById('r4-notif');
-          const typed = document.getElementById('r4-typed');
-          const htopOut = document.getElementById('r4-htop-out');
-          const ctrlKey = document.getElementById('r4-key-ctrl');
-
-          if (stepBucket === 0) {
-            if (stepKey !== lastStepKey) {
-              header.classList.remove('collapsed');
-              notif.classList.remove('show');
-              typed.textContent = '';
-              htopOut.style.display = 'none';
-              ctrlKey.classList.remove('active');
-              moveCursor(290, 96, true);
-              setHud('REEL 04 · STEP 1/3', 'User taps Focus Mode (⤢) in the mobile toolbar to collapse the outer header.');
-            }
-          } else if (stepBucket === 1 || stepBucket === 2) {
-            const cmd = 'htop -d 10';
-            const subP = Math.min(1, (p - 0.25) / 0.35);
-            typed.textContent = cmd.slice(0, Math.floor(subP * cmd.length));
-            htopOut.style.display = subP >= 0.85 ? 'block' : 'none';
-            if (stepKey !== lastStepKey) {
-              header.classList.add('collapsed');
-              ctrlKey.classList.add('active');
-              moveCursor(105, 340, true);
-              setHud('REEL 04 · STEP 2/3', 'Outer header collapses; 2x7 Termux keys & unbuffered IME stream characters live.');
-            }
-          } else {
-            if (stepKey !== lastStepKey) {
-              notif.classList.add('show');
-              moveCursor(190, 48, false);
-              setHud('REEL 04 · STEP 3/3', 'Phone locks/minimizes: Android Foreground Service + WakeLock keep SSH alive.');
-            }
-          }
-        } else if (reelIdx === 4) {
-          // REEL 05: Host Stop-Share Auto-Close & Native SFTP
-          const stopBtn = document.getElementById('r5-stop-btn');
-          const uploadPct = document.getElementById('r5-upload-pct');
-          const viewerState = document.getElementById('r5-viewer-state');
-          const rejoinState = document.getElementById('r5-rejoin-state');
-          const toast = document.getElementById('r5-toast');
-
-          if (stepBucket === 0 || stepBucket === 1) {
-            const pct = Math.min(100, Math.floor((p / 0.45) * 100));
-            uploadPct.textContent = pct >= 100 ? 'Uploaded 100% ✓' : `Uploading ${pct}%...`;
-            if (stepKey !== lastStepKey) {
-              stopBtn.textContent = 'Sharing (2) ×';
-              stopBtn.style.background = 'rgba(16,185,129,0.18)';
-              stopBtn.style.color = '#34d399';
-              viewerState.innerHTML = '<strong style="color:#34d399">● Connected to Relay</strong><br/><span style="color:var(--muted)">Streaming binary PTY frames from host...</span>';
-              rejoinState.innerHTML = '<span class="ot-btn ot-btn-rejoin">Rejoin (Control)</span>';
-              toast.classList.remove('show');
-              moveCursor(310, 260, false);
-              setHud('REEL 05 · STEP 1/2', 'Built-in russh-sftp uploads files natively while 2 teammates view the live relay.');
-            }
-          } else {
-            if (stepKey !== lastStepKey) {
-              uploadPct.textContent = 'Uploaded 100% ✓';
-              stopBtn.textContent = 'Share Stopped';
-              stopBtn.style.background = 'rgba(244,63,94,0.18)';
-              stopBtn.style.color = '#fda4af';
-              viewerState.innerHTML = '<strong style="color:#fda4af">● Session Ended by Host</strong><br/><span style="color:var(--muted)">Remote tab closed automatically &amp; approval revoked.</span>';
-              rejoinState.innerHTML = '<span class="ot-btn ot-btn-view" style="margin-right:4px">Request View</span><span class="ot-btn ot-btn-ctrl">Request Control</span>';
-              toast.classList.add('show');
-              moveCursor(835, 22, true);
-              setHud('REEL 05 · STEP 2/2', 'Host clicks "Sharing (2) ×": viewers get notified, remote tabs auto-close, and Rejoin resets.');
-            }
-          }
-        }
-
-        lastStepKey = stepKey;
-      }
-
-      function selectReel(idx) {
-        currentReel = idx;
-        elapsed = 0;
-        lastStepKey = '';
-        reelBtns.forEach((b, i) => b.classList.toggle('active', i === idx));
-        reelPanes.forEach((p, i) => p.classList.toggle('active', i === idx));
-        reelBars.forEach((bar) => { bar.style.width = '0%'; });
-        applyReelFrame(idx, 0);
-      }
-
-      reelBtns.forEach((btn) => {
-        btn.addEventListener('click', () => {
-          selectReel(Number(btn.getAttribute('data-reel')));
-        });
-      });
-
-      if (toggleBtn) {
-        toggleBtn.addEventListener('click', () => {
-          playing = !playing;
-          toggleBtn.textContent = playing ? '⏸ Pause Reel' : '▶ Play Reel';
-        });
-      }
-
-      function loop(now) {
-        const dt = now - lastTick;
-        lastTick = now;
-        if (playing) {
-          elapsed += dt;
-          if (elapsed >= REEL_DURATION) {
-            selectReel((currentReel + 1) % reelBtns.length);
-          } else {
-            const p = elapsed / REEL_DURATION;
-            const activeBar = reelBars[currentReel];
-            if (activeBar) activeBar.style.width = `${(p * 100).toFixed(1)}%`;
-            applyReelFrame(currentReel, p);
-          }
-        }
-        requestAnimationFrame(loop);
-      }
-
-      selectReel(0);
-      requestAnimationFrame(loop);
-
-      // Copy Buttons
-      document.querySelectorAll('[data-copy]').forEach((btn) => {
-        btn.addEventListener('click', () => {
-          const targetId = btn.getAttribute('data-copy');
-          const codeEl = targetId ? document.getElementById(targetId) : null;
-          if (!codeEl) return;
-          navigator.clipboard.writeText(codeEl.textContent.trim()).then(() => {
-            const prev = btn.textContent;
-            btn.textContent = 'Copied ✓';
-            setTimeout(() => { btn.textContent = prev; }, 1600);
-          });
-        });
-      });
-
-      // GPU-safe IntersectionObserver Reveal
-      const observer = new IntersectionObserver(
-        (entries) => {
-          entries.forEach((entry) => {
-            if (entry.isIntersecting) {
-              entry.target.classList.add('in-view');
-              observer.unobserve(entry.target);
-            }
-          });
-        },
-        { threshold: 0.12 }
-      );
-      document.querySelectorAll('.reveal').forEach((el) => observer.observe(el));
-    })();
-  </script>
+  <script src="app.js" defer></script>
 </body>
 </html>
