@@ -375,6 +375,112 @@ async fn establish_ssh_session(
     Ok(session)
 }
 
+#[cfg(target_os = "macos")]
+async fn open_macos_ssh_pty_fallback(
+    app: AppHandle,
+    state: State<'_, TerminalState>,
+    config: TerminalOpenConfig,
+    rows: u16,
+    cols: u16,
+) -> Result<(), String> {
+    use std::os::unix::fs::PermissionsExt;
+
+    let (clean_host, actual_port) = normalize_host_port(
+        config.host.as_deref().unwrap_or(""),
+        config.port.unwrap_or(22),
+    );
+    let user = config
+        .username
+        .as_deref()
+        .map(str::trim)
+        .filter(|u| !u.is_empty())
+        .unwrap_or("root");
+
+    let pty_system = native_pty_system();
+    let pair = pty_system
+        .openpty(PtySize {
+            rows,
+            cols,
+            pixel_width: 0,
+            pixel_height: 0,
+        })
+        .map_err(|e| e.to_string())?;
+
+    let mut cmd = CommandBuilder::new("/usr/bin/ssh");
+    cmd.env("TERM", "xterm-256color");
+    cmd.arg("-p");
+    cmd.arg(actual_port.to_string());
+    cmd.arg("-o");
+    cmd.arg("StrictHostKeyChecking=accept-new");
+
+    let mut temp_key_path: Option<std::path::PathBuf> = None;
+    if let Some(key_pem) = config.private_key.as_deref().filter(|k| !k.trim().is_empty()) {
+        let key_file = std::env::temp_dir().join(format!("opentermius_key_{}", config.session_id));
+        if std::fs::write(&key_file, format!("{}\n", key_pem.trim())).is_ok() {
+            let _ = std::fs::set_permissions(&key_file, std::fs::Permissions::from_mode(0o600));
+            cmd.arg("-i");
+            cmd.arg(key_file.to_string_lossy().to_string());
+            cmd.arg("-o");
+            cmd.arg("IdentitiesOnly=yes");
+            temp_key_path = Some(key_file);
+        }
+    }
+    cmd.arg(format!("{}@{}", user, clean_host));
+
+    let child = pair.slave.spawn_command(cmd).map_err(|e| e.to_string())?;
+    drop(pair.slave);
+
+    let reader = pair.master.try_clone_reader().map_err(|e| e.to_string())?;
+    let writer = Arc::new(Mutex::new(
+        pair.master.take_writer().map_err(|e| e.to_string())?,
+    ));
+
+    let session_id_clone = config.session_id.clone();
+    let app_clone = app.clone();
+    let sessions_arc = state.sessions.clone();
+
+    {
+        let mut sessions = state.sessions.lock().await;
+        sessions.insert(
+            config.session_id,
+            SessionHandle::LocalPty {
+                writer,
+                master: Arc::new(Mutex::new(pair.master)),
+                child: Arc::new(Mutex::new(child)),
+            },
+        );
+    }
+
+    std::thread::spawn(move || {
+        let mut buf = [0u8; 4096];
+        let mut utf8_pending = Vec::new();
+        let mut r = reader;
+        let event_name = format!("terminal-data:{}", session_id_clone);
+        loop {
+            match r.read(&mut buf) {
+                Ok(0) => break,
+                Ok(n) => {
+                    let chunk = drain_utf8_chunk(&mut utf8_pending, &buf[..n]);
+                    if !chunk.is_empty() && app_clone.emit(&event_name, chunk).is_err() {
+                        break;
+                    }
+                }
+                Err(_) => break,
+            }
+        }
+        if let Some(p) = temp_key_path {
+            let _ = std::fs::remove_file(p);
+        }
+        tauri::async_runtime::block_on(async {
+            sessions_arc.lock().await.remove(&session_id_clone);
+        });
+        let exit_event = format!("terminal-exit:{}", session_id_clone);
+        let _ = app_clone.emit(&exit_event, ());
+    });
+
+    Ok(())
+}
+
 #[tauri::command]
 async fn terminal_open(
     app: AppHandle,
@@ -388,7 +494,7 @@ async fn terminal_open(
     if !host_target.is_empty() {
         let port = config.port.unwrap_or(22);
         let username = config.username.as_deref().unwrap_or("root");
-        let session = establish_ssh_session(
+        match establish_ssh_session(
             &host_target,
             port,
             username,
@@ -396,63 +502,73 @@ async fn terminal_open(
             config.private_key.as_deref(),
             config.passphrase.as_deref(),
         )
-        .await?;
+        .await
+        {
+            Ok(session) => {
+                let channel = session
+                    .channel_open_session()
+                    .await
+                    .map_err(|e| format!("Failed to open SSH channel: {}", e))?;
 
-        let channel = session
-            .channel_open_session()
-            .await
-            .map_err(|e| format!("Failed to open SSH channel: {}", e))?;
+                channel
+                    .request_pty(true, "xterm-256color", cols as u32, rows as u32, 0, 0, &[])
+                    .await
+                    .map_err(|e| format!("Failed to request PTY: {}", e))?;
 
-        channel
-            .request_pty(true, "xterm-256color", cols as u32, rows as u32, 0, 0, &[])
-            .await
-            .map_err(|e| format!("Failed to request PTY: {}", e))?;
+                channel
+                    .request_shell(true)
+                    .await
+                    .map_err(|e| format!("Failed to start remote shell: {}", e))?;
 
-        channel
-            .request_shell(true)
-            .await
-            .map_err(|e| format!("Failed to start remote shell: {}", e))?;
+                let (mut read_half, write_half) = channel.split();
+                let session_id_clone = config.session_id.clone();
+                let app_clone = app.clone();
+                let sessions_arc = state.sessions.clone();
 
-        let (mut read_half, write_half) = channel.split();
-        let session_id_clone = config.session_id.clone();
-        let app_clone = app.clone();
-        let sessions_arc = state.sessions.clone();
-
-        tauri::async_runtime::spawn(async move {
-            let event_name = format!("terminal-data:{}", session_id_clone);
-            let mut utf8_pending = Vec::new();
-            while let Some(msg) = read_half.wait().await {
-                match msg {
-                    ChannelMsg::Data { ref data } => {
-                        let chunk = drain_utf8_chunk(&mut utf8_pending, data);
-                        if !chunk.is_empty() && app_clone.emit(&event_name, chunk).is_err() {
-                            break;
+                tauri::async_runtime::spawn(async move {
+                    let event_name = format!("terminal-data:{}", session_id_clone);
+                    let mut utf8_pending = Vec::new();
+                    while let Some(msg) = read_half.wait().await {
+                        match msg {
+                            ChannelMsg::Data { ref data } => {
+                                let chunk = drain_utf8_chunk(&mut utf8_pending, data);
+                                if !chunk.is_empty() && app_clone.emit(&event_name, chunk).is_err() {
+                                    break;
+                                }
+                            }
+                            ChannelMsg::ExtendedData { ref data, .. } => {
+                                let chunk = drain_utf8_chunk(&mut utf8_pending, data);
+                                if !chunk.is_empty() && app_clone.emit(&event_name, chunk).is_err() {
+                                    break;
+                                }
+                            }
+                            ChannelMsg::Eof | ChannelMsg::Close => break,
+                            _ => {}
                         }
                     }
-                    ChannelMsg::ExtendedData { ref data, .. } => {
-                        let chunk = drain_utf8_chunk(&mut utf8_pending, data);
-                        if !chunk.is_empty() && app_clone.emit(&event_name, chunk).is_err() {
-                            break;
-                        }
-                    }
-                    ChannelMsg::Eof | ChannelMsg::Close => break,
-                    _ => {}
-                }
+                    sessions_arc.lock().await.remove(&session_id_clone);
+                    let exit_event = format!("terminal-exit:{}", session_id_clone);
+                    let _ = app_clone.emit(&exit_event, ());
+                });
+
+                let mut sessions = state.sessions.lock().await;
+                sessions.insert(
+                    config.session_id,
+                    SessionHandle::RemoteSsh {
+                        write_half: Arc::new(tokio::sync::Mutex::new(write_half)),
+                        session: Arc::new(tokio::sync::Mutex::new(session)),
+                    },
+                );
+                return Ok(());
             }
-            sessions_arc.lock().await.remove(&session_id_clone);
-            let exit_event = format!("terminal-exit:{}", session_id_clone);
-            let _ = app_clone.emit(&exit_event, ());
-        });
-
-        let mut sessions = state.sessions.lock().await;
-        sessions.insert(
-            config.session_id,
-            SessionHandle::RemoteSsh {
-                write_half: Arc::new(tokio::sync::Mutex::new(write_half)),
-                session: Arc::new(tokio::sync::Mutex::new(session)),
-            },
-        );
-        return Ok(());
+            Err(err) => {
+                #[cfg(target_os = "macos")]
+                if err.contains("os error 65") || err.to_lowercase().contains("no route to host") {
+                    return open_macos_ssh_pty_fallback(app, state, config, rows, cols).await;
+                }
+                return Err(err);
+            }
+        }
     }
 
     // Local Shell via native PTY

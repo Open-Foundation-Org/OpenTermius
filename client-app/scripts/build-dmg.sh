@@ -5,7 +5,7 @@ DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 APP_DIR="$DIR/src-tauri/target/release/bundle/macos"
 DMG_DIR="$DIR/src-tauri/target/release/bundle/dmg"
 APP_NAME="opentermius.app"
-DMG_NAME="OpenTermius_0.7.2_aarch64.dmg"
+DMG_NAME="OpenTermius_0.7.3_aarch64.dmg"
 STAGING_DIR="/tmp/opentermius-dmg-staging"
 RW_DMG="/tmp/opentermius-rw.dmg"
 
@@ -17,6 +17,24 @@ export TAURI_SIGNING_PRIVATE_KEY_PASSWORD="${TAURI_SIGNING_PRIVATE_KEY_PASSWORD:
 echo "1. Building release binary..."
 cd "$DIR"
 npx tauri build --bundles app
+
+echo "1b. Re-signing macOS app & updater archive with bound CFBundleIdentifier..."
+xattr -cr "$APP_DIR/$APP_NAME" || true
+codesign --force --deep --identifier "com.opentermius.client" --sign - "$APP_DIR/$APP_NAME"
+codesign --verify --deep --strict "$APP_DIR/$APP_NAME"
+rm -f "$APP_DIR/$APP_NAME.tar.gz" "$APP_DIR/$APP_NAME.tar.gz.sig"
+COPYFILE_DISABLE=1 tar -czf "$APP_DIR/$APP_NAME.tar.gz" -C "$APP_DIR" "$APP_NAME"
+if [ -n "${TAURI_SIGNING_PRIVATE_KEY:-}" ]; then
+  KEY_PATH="$TAURI_SIGNING_PRIVATE_KEY"
+  (
+    unset TAURI_SIGNING_PRIVATE_KEY
+    if [ -f "$KEY_PATH" ]; then
+      npx tauri signer sign -f "$KEY_PATH" -p "${TAURI_SIGNING_PRIVATE_KEY_PASSWORD:-}" "$APP_DIR/$APP_NAME.tar.gz"
+    else
+      npx tauri signer sign -k "$KEY_PATH" -p "${TAURI_SIGNING_PRIVATE_KEY_PASSWORD:-}" "$APP_DIR/$APP_NAME.tar.gz"
+    fi
+  )
+fi
 
 echo "2. Preparing clean staging & ad-hoc signing..."
 rm -rf "$STAGING_DIR" "$RW_DMG"
